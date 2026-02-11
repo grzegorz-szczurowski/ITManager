@@ -1,0 +1,322 @@
+﻿@namespace ITManager.Components.Pages.Projects
+
+@* File: Components/Pages/Projects/ProjectTicketLinkDialog.razor
+   Description: Modal do powiązania istniejących ticketów (project_id IS NULL) z projektem.
+                Wyszukiwarka + multi-select + zapis powiązań.
+   Version: 1.05
+   Created: 2026-01-28
+   Updated:
+   - 2026-01-28 - FIX: wyszukiwanie bez utraty focusu (disable tylko przy zapisie).
+   - 2026-01-28 - FIX: MudBlazor 8: MudCheckBox powinien używać Value/ValueChanged (Checked bywa legacy i nie aktualizuje VM, więc przycisk Powiąż zostaje nieaktywny).
+   Notes:
+   - Backend: ProjectsService.GetTicketsLinkCandidatesAsync(projectId, search)
+              ProjectsService.LinkTicketsToProjectAsync(projectId, List<long> ticketIds)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Models.Projects
+@using ITManager.Services.Projects
+
+@inject ProjectsService ProjectsService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+
+        <MudStack Spacing="2">
+
+            <MudText Typo="Typo.subtitle1" Style="font-weight:600;">
+                Powiąż tickety z projektem
+            </MudText>
+
+            <MudText Typo="Typo.body2" Style="opacity:0.8;">
+                Pokazuję tylko tickety, które nie są jeszcze przypięte do żadnego projektu.
+            </MudText>
+
+            <MudTextField T="string"
+                          Value="@_search"
+                          ValueChanged="OnSearchChanged"
+                          ValueChangedDebounceInterval="350"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Placeholder="Szukaj po ID, tytule, statusie, priorytecie, przypisaniu..."
+                          Immediate="true"
+                          Dense="true"
+                          Disabled="@_saving" />
+
+            <MudDivider />
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.caption" Style="opacity:0.75;">
+                    Wyniki: @_rows.Count, zaznaczone: @SelectedCount
+                </MudText>
+
+                <MudStack Row="true" Spacing="1">
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Refresh"
+                               Disabled="@(_loadingList || _saving)"
+                               OnClick="ReloadAsync">
+                        Odśwież
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.SelectAll"
+                               Disabled="@(_loadingList || _saving || !_rows.Any())"
+                               OnClick="SelectAll">
+                        Zaznacz wszystko
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Deselect"
+                               Disabled="@(_loadingList || _saving || SelectedCount == 0)"
+                               OnClick="ClearSelection">
+                        Wyczyść
+                    </MudButton>
+                </MudStack>
+            </MudStack>
+
+            <div style="position:relative;">
+                <MudTable Items="_rows"
+                          Dense="true"
+                          Hover="true"
+                          Bordered="true"
+                          Outlined="true"
+                          FixedHeader="true"
+                          Height="460px"
+                          Breakpoint="Breakpoint.Sm"
+                          Loading="@_loadingList">
+
+                    <HeaderContent>
+                        <MudTh Style="width:54px;"></MudTh>
+                        <MudTh Style="width:90px;">Id</MudTh>
+                        <MudTh>Title</MudTh>
+                        <MudTh Style="width:140px;">Status</MudTh>
+                        <MudTh Style="width:140px;">Priority</MudTh>
+                        <MudTh Style="width:220px;">Assigned</MudTh>
+                    </HeaderContent>
+
+                    <RowTemplate>
+                        <MudTd>
+                            <MudCheckBox T="bool"
+                                         @key="context.Ticket.TicketId"
+                                         Value="context.Selected"
+                                         ValueChanged="(bool v) => OnRowSelectedValueChanged(context, v)"
+                                         Disabled="@(_loadingList || _saving)" />
+                        </MudTd>
+
+                        <MudTd DataLabel="Id">
+                            @context.Ticket.TicketId
+                        </MudTd>
+
+                        <MudTd DataLabel="Title">
+                            <span style="display:block; max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                @context.Ticket.Title
+                            </span>
+                        </MudTd>
+
+                        <MudTd DataLabel="Status">
+                            @context.Ticket.StatusName
+                        </MudTd>
+
+                        <MudTd DataLabel="Priority">
+                            @context.Ticket.PriorityName
+                        </MudTd>
+
+                        <MudTd DataLabel="Assigned">
+                            @context.Ticket.AssignedToDisplayName
+                        </MudTd>
+                    </RowTemplate>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="pa-3">
+                            Brak wyników.
+                        </MudText>
+                    </NoRecordsContent>
+                </MudTable>
+
+                <MudOverlay Visible="@_loadingList"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true">
+                    <MudPaper Class="pa-6" Style="border-radius:12px; min-width:240px;">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">Ładowanie...</MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                    @_error
+                </MudAlert>
+            }
+
+        </MudStack>
+
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   Disabled="@(_loadingList || _saving)"
+                   OnClick="Cancel">
+            Anuluj
+        </MudButton>
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Link"
+                   Disabled="@(_loadingList || _saving || SelectedCount == 0)"
+                   OnClick="ConfirmAsync">
+            Powiąż (@SelectedCount)
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int ProjectId { get; set; }
+
+    private bool _loadingList;
+    private bool _saving;
+
+    private string _error = string.Empty;
+    private string _search = string.Empty;
+
+    private sealed class TicketRowVm
+    {
+        public ProjectLinkableTicketDto Ticket { get; set; } = new();
+        public bool Selected { get; set; }
+    }
+
+    private List<TicketRowVm> _rows = new();
+
+    private int SelectedCount => _rows.Count(x => x.Selected);
+
+    private void OnRowSelectedValueChanged(TicketRowVm row, bool value)
+    {
+        // MudBlazor 8: używamy Value/ValueChanged. Dodatkowo wymuszamy re-render,
+        // żeby Disabled na przycisku "Powiąż" od razu przeliczył SelectedCount.
+        row.Selected = value;
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (ProjectId <= 0)
+        {
+            _error = "Nieprawidłowy projekt.";
+            return;
+        }
+
+        _loadingList = true;
+        _error = string.Empty;
+
+        try
+        {
+            var previouslySelected = _rows
+                .Where(x => x.Selected)
+                .Select(x => x.Ticket.TicketId)
+                .ToHashSet();
+
+            var list = await ProjectsService.GetTicketsLinkCandidatesAsync(ProjectId, _search ?? string.Empty);
+            var items = list ?? new List<ProjectLinkableTicketDto>();
+
+            _rows = items
+                .Select(t => new TicketRowVm
+                {
+                    Ticket = t,
+                    Selected = previouslySelected.Contains(t.TicketId)
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _rows = new List<TicketRowVm>();
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loadingList = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task OnSearchChanged(string value)
+    {
+        _search = value ?? string.Empty;
+        return ReloadAsync();
+    }
+
+    private void SelectAll()
+    {
+        foreach (var r in _rows)
+            r.Selected = true;
+
+        StateHasChanged();
+    }
+
+    private void ClearSelection()
+    {
+        foreach (var r in _rows)
+            r.Selected = false;
+
+        StateHasChanged();
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task ConfirmAsync()
+    {
+        if (_saving)
+            return;
+
+        if (ProjectId <= 0)
+        {
+            Snackbar.Add("Nieprawidłowy projekt.", Severity.Error);
+            return;
+        }
+
+        var ids = _rows.Where(x => x.Selected).Select(x => x.Ticket.TicketId).ToList();
+        if (ids.Count == 0)
+        {
+            Snackbar.Add("Nie wybrano ticketów.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        _error = string.Empty;
+
+        try
+        {
+            await ProjectsService.LinkTicketsToProjectAsync(ProjectId, ids);
+            Snackbar.Add("Tickety powiązane.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

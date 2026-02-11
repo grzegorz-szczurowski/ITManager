@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Tickets assigned to me</value>
+  </data>
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Search title, description, solution, requester</value>
+  </data>
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Clear filters</value>
+  </data>
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Advanced filters</value>
+  </data>
+
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view this list.</value>
+  </data>
+
+	<data name="PriorityLabel" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+	<data name="StatusLabel" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="CategoryLabel" xml:space="preserve">
+    <value>Category</value>
+  </data>
+	<data name="RequestDateLabel" xml:space="preserve">
+    <value>Request date</value>
+  </data>
+	<data name="RequesterLabel" xml:space="preserve">
+    <value>Requester</value>
+  </data>
+	<data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+	<data name="Loading" xml:space="preserve">
+    <value>Loading...</value>
+  </data>
+
+	<data name="ColTicketNo" xml:space="preserve">
+    <value>Ticket #</value>
+  </data>
+	<data name="ColCategory" xml:space="preserve">
+    <value>Category</value>
+  </data>
+	<data name="ColDate" xml:space="preserve">
+    <value>Date</value>
+  </data>
+	<data name="ColRequester" xml:space="preserve">
+    <value>Requester</value>
+  </data>
+	<data name="ColTitle" xml:space="preserve">
+    <value>Title</value>
+  </data>
+	<data name="ColPriority" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+	<data name="ColStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<data name="NoRecords" xml:space="preserve">
+    <value>No tickets to display.</value>
+  </data>
+
+	<data name="LoadError" xml:space="preserve">
+    <value>Failed to load tickets.</value>
+  </data>
+	<data name="LoadError_Inline" xml:space="preserve">
+    <value>Failed to load tickets. Please try again.</value>
+  </data>
+
+	<data name="PriorityFallback" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+</root>

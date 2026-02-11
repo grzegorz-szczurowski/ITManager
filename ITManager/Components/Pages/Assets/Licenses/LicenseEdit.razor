@@ -1,0 +1,1118 @@
+﻿@page "/assets/licenses/edit/{Id:int}"
+@page "/assets/licenses/create"
+@namespace ITManager.Components.Pages.Assets.Licenses
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "Perm:Assets.Licenses.View")]
+
+@* File: Components/Pages/Assets/Licenses/LicenseEdit.razor
+   Description: Ekran (page) dodawania i edycji licencji, bazujący na LicenseEditDialog, ale bez modala.
+                UX:
+                  - Summary header + tabs ze scrollem
+                  - Dla istniejących: start w trybie read-only, Enable edit odblokowuje edycję
+                  - Dla nowych: start w trybie edycji (jeśli user ma Edit)
+                  - Kłódka na polach read-only
+                  - Lookupy jako MudAutocomplete (LookupItem) z wyszukiwaniem
+   Version: 1.01
+   Updated: 2026-02-08
+   Notes:
+     - Uprawnienia: Assets.Licenses.View, Assets.Licenses.Edit
+     - Pracujemy na *_Id + UserName, zgodnie z LicensesService
+   Change log:
+     - 1.01 (2026-02-08) UI: usunięty Back. Przeniesione: Enable edit na dół po lewej, Save na dół po prawej.
+*@
+
+@using System
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using System.Collections.Generic
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services.Auth
+
+@inject LicensesService LicensesService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IStringLocalizer<LicenseEdit> L
+@inject IJSRuntime JS
+@inject ILogger<LicenseEdit> Logger
+
+<MudPaper Class="pa-4 license-edit-root" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                    @_errorMessage
+                </MudAlert>
+            }
+
+            <div class="license-page-container">
+
+                @if (_loading)
+                {
+                    <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="license-page-loading">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1" Class="mt-2">@L["Loading"]</MudText>
+                    </MudStack>
+                }
+                else
+                {
+                    <MudPaper Elevation="0" Class="license-summary">
+                        <MudStack Spacing="1">
+
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="license-summary-top">
+                                <MudText Typo="Typo.h6" Class="license-summary-title">
+                                    @BuildTitle()
+                                </MudText>
+
+                                @if (!string.IsNullOrWhiteSpace(Safe(SelectedTypeName())))
+                                {
+                                    <MudChip T="string" Variant="Variant.Filled" Color="Color.Primary" Class="ml-2">
+                                        @Safe(SelectedTypeName())
+                                    </MudChip>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(Safe(SelectedStatusName())))
+                                {
+                                    <MudChip T="string" Variant="Variant.Outlined" Color="@GetStatusColor(SelectedStatusName())" Class="ml-2">
+                                        @Safe(SelectedStatusName())
+                                    </MudChip>
+                                }
+
+                                <MudSpacer />
+
+                                @if (!_canEdit)
+                                {
+                                    <MudChip T="string" Variant="Variant.Outlined" Color="Color.Default">
+                                        @L["NoEditPermission"]
+                                    </MudChip>
+                                }
+                            </MudStack>
+
+                            <MudText Typo="Typo.body2" Class="license-summary-subtitle">
+                                @BuildSubtitle()
+                            </MudText>
+
+                            <MudGrid Spacing="1" AlignItems="AlignItems.Center" Class="license-summary-grid">
+
+                                <MudItem xs="12" sm="6" md="6" Class="license-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="license-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Badge" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Fields.InventoryNo"]</b> <span class="license-mono">@Safe(_edit.InventoryNo, "-")</span>
+                                        </MudText>
+
+                                        <MudTooltip Text="@L["CopyInventoryNo"]">
+                                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                           Size="Size.Medium"
+                                                           Color="Color.Default"
+                                                           Variant="Variant.Text"
+                                                           Disabled="@string.IsNullOrWhiteSpace(Safe(_edit.InventoryNo))"
+                                                           Class="ml-1"
+                                                           OnClick="@(() => CopyToClipboardAsync(_edit.InventoryNo, L["Fields.InventoryNo"]))" />
+                                        </MudTooltip>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="license-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="license-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Fields.User"]</b> @Safe(SelectedUserName(), "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="license-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="license-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Factory" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Fields.Producer"]</b> @Safe(SelectedProducerName(), "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="license-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="license-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.ViewInAr" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Fields.Model"]</b> @Safe(SelectedModelName(), "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                            </MudGrid>
+
+                        </MudStack>
+                    </MudPaper>
+
+                    <MudPaper Elevation="0" Class="license-tabs">
+                        <MudTabs Rounded="true" Elevation="0" KeepPanelsAlive="true">
+
+                            <MudTabPanel Text="@L["Tabs.General"]">
+                                <div class="license-tab-scroll">
+                                    <MudForm @ref="_form">
+                                        <MudGrid Spacing="2">
+
+                                            <MudItem xs="12" md="4">
+                                                @if (_isEditEnabled)
+                                                {
+                                                    <MudAutocomplete T="LookupItem"
+                                                                     Label="@L["Fields.Type"]"
+                                                                     Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense"
+                                                                     Dense="true"
+                                                                     Disabled="@(_loading || !_canEdit)"
+                                                                     Clearable="true"
+                                                                     ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                                     Value="@_typeSelected"
+                                                                     ValueChanged="OnTypeChanged"
+                                                                     SearchFunc="@((string s, CancellationToken ct) => SearchLookupAsync(_lookups.Types, s, ct))"
+                                                                     DebounceInterval="150"
+                                                                     ResetValueOnEmptyText="true" />
+                                                }
+                                                else
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Fields.Type"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@Safe(SelectedTypeName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="4">
+                                                @if (_isEditEnabled)
+                                                {
+                                                    <MudAutocomplete T="LookupItem"
+                                                                     Label="@L["Fields.Status"]"
+                                                                     Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense"
+                                                                     Dense="true"
+                                                                     Disabled="@(_loading || !_canEdit)"
+                                                                     Clearable="true"
+                                                                     ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                                     Value="@_statusSelected"
+                                                                     ValueChanged="OnStatusChanged"
+                                                                     SearchFunc="@((string s, CancellationToken ct) => SearchLookupAsync(_lookups.Statuses, s, ct))"
+                                                                     DebounceInterval="150"
+                                                                     ResetValueOnEmptyText="true" />
+                                                }
+                                                else
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Fields.Status"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@Safe(SelectedStatusName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="4">
+                                                @if (_isEditEnabled)
+                                                {
+                                                    <MudAutocomplete T="LookupItem"
+                                                                     Label="@L["Fields.User"]"
+                                                                     Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense"
+                                                                     Dense="true"
+                                                                     Disabled="@(_loading || !_canEdit)"
+                                                                     Clearable="true"
+                                                                     ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                                     Value="@_userSelected"
+                                                                     ValueChanged="OnUserChanged"
+                                                                     SearchFunc="@((string s, CancellationToken ct) => SearchLookupAsync(_lookups.Users, s, ct))"
+                                                                     DebounceInterval="150"
+                                                                     ResetValueOnEmptyText="true" />
+                                                }
+                                                else
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Fields.User"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@Safe(SelectedUserName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                @if (_isEditEnabled)
+                                                {
+                                                    <MudAutocomplete T="LookupItem"
+                                                                     Label="@L["Fields.Producer"]"
+                                                                     Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense"
+                                                                     Dense="true"
+                                                                     Disabled="@(_loading || !_canEdit)"
+                                                                     Clearable="true"
+                                                                     ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                                     Value="@_producerSelected"
+                                                                     ValueChanged="OnProducerChanged"
+                                                                     SearchFunc="@((string s, CancellationToken ct) => SearchLookupAsync(_lookups.Producers, s, ct))"
+                                                                     DebounceInterval="150"
+                                                                     ResetValueOnEmptyText="true" />
+                                                }
+                                                else
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Fields.Producer"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@Safe(SelectedProducerName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                @if (_isEditEnabled)
+                                                {
+                                                    <MudAutocomplete T="LookupItem"
+                                                                     Label="@L["Fields.Model"]"
+                                                                     Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense"
+                                                                     Dense="true"
+                                                                     Disabled="@(_loading || !_canEdit)"
+                                                                     Clearable="true"
+                                                                     ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                                     Value="@_modelSelected"
+                                                                     ValueChanged="OnModelChanged"
+                                                                     SearchFunc="@((string s, CancellationToken ct) => SearchLookupAsync(_lookups.Models, s, ct))"
+                                                                     DebounceInterval="150"
+                                                                     ResetValueOnEmptyText="true" />
+                                                }
+                                                else
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Fields.Model"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@Safe(SelectedModelName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                            </MudItem>
+
+                                        </MudGrid>
+                                    </MudForm>
+                                </div>
+                            </MudTabPanel>
+
+                            <MudTabPanel Text="@L["Tabs.Subscription"]">
+                                <div class="license-tab-scroll">
+                                    <MudGrid Spacing="2">
+
+                                        <MudItem xs="12" md="6">
+                                            <MudDatePicker Label="@L["Fields.SubscriptionStart"]"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Disabled="@_loading"
+                                                           ReadOnly="@(!_isEditEnabled || !_canEdit)"
+                                                           Date="@_edit.SubscriptionStarts"
+                                                           DateChanged="d => SetEditDate(v => _edit.SubscriptionStarts = v, d)"
+                                                           Adornment="@LockAdornment"
+                                                           AdornmentIcon="@LockIcon"
+                                                           AdornmentColor="Color.Default" />
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="6">
+                                            <MudDatePicker Label="@L["Fields.SubscriptionEnd"]"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Disabled="@_loading"
+                                                           ReadOnly="@(!_isEditEnabled || !_canEdit)"
+                                                           Date="@_edit.SubscriptionEnds"
+                                                           DateChanged="d => SetEditDate(v => _edit.SubscriptionEnds = v, d)"
+                                                           Adornment="@LockAdornment"
+                                                           AdornmentIcon="@LockIcon"
+                                                           AdornmentColor="Color.Default" />
+                                        </MudItem>
+
+                                    </MudGrid>
+                                </div>
+                            </MudTabPanel>
+
+                            <MudTabPanel Text="@L["Tabs.Details"]">
+                                <div class="license-tab-scroll">
+                                    <MudGrid Spacing="2">
+
+                                        <MudItem xs="12" md="6">
+                                            <MudTextField T="string"
+                                                          Label="@L["Fields.Name"]"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="@(!_isEditEnabled || !_canEdit)"
+                                                          Disabled="@_loading"
+                                                          Value="@_edit.Name"
+                                                          ValueChanged="v => SetEditString(x => _edit.Name = x, v)"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="6">
+                                            <MudTextField T="string"
+                                                          Label="@L["Fields.InventoryNo"]"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="@(!_isEditEnabled || !_canEdit)"
+                                                          Disabled="@_loading"
+                                                          Value="@_edit.InventoryNo"
+                                                          ValueChanged="v => SetEditString(x => _edit.InventoryNo = x, v)"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        </MudItem>
+
+                                        <MudItem xs="12">
+                                            <MudTextField T="string"
+                                                          Label="@L["Fields.Note"]"
+                                                          Lines="10"
+                                                          AutoGrow="false"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="@(!_isEditEnabled || !_canEdit)"
+                                                          Disabled="@_loading"
+                                                          Value="@_edit.Note"
+                                                          ValueChanged="v => SetEditString(x => _edit.Note = x, v)"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        </MudItem>
+
+                                    </MudGrid>
+                                </div>
+                            </MudTabPanel>
+
+                        </MudTabs>
+                    </MudPaper>
+
+                    <MudPaper Elevation="0" Class="license-footer">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="license-footer-inner">
+
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="@(_isEditEnabled ? Color.Default : Color.Primary)"
+                                       StartIcon="@(_isEditEnabled ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                                       OnClick="ToggleEditMode"
+                                       Disabled="@(_loading || !_canEdit || !_canView)">
+                                @(_isEditEnabled? L["Lock"] : L["EnableEdit"])
+                            </MudButton>
+
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Save"
+                                           OnClick="SaveAsync"
+                                           Disabled="@(!_isEditEnabled || _loading || !_isDirty || !_canEdit || !_canView)">
+                                    @L["Save"]
+                                </MudButton>
+
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Close"
+                                           OnClick="BackAsync"
+                                           Disabled="@_loading">
+                                    @L["Close"]
+                                </MudButton>
+                            </MudStack>
+
+                        </MudStack>
+                    </MudPaper>
+                }
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .license-edit-root {
+        padding-bottom: 78px;
+    }
+
+    .license-page-container {
+        width: 100%;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .license-page-loading {
+        height: 720px;
+    }
+
+    .license-summary {
+        padding: 14px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        margin-bottom: 12px;
+        background: rgba(255,255,255,0.02);
+        box-sizing: border-box;
+    }
+
+    .license-summary-top {
+        min-width: 0;
+    }
+
+    .license-summary-title {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .license-summary-subtitle {
+        opacity: 0.85;
+        margin-top: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .license-summary-grid {
+        margin-top: 6px;
+    }
+
+    .license-summary-cell {
+        display: flex;
+        min-width: 0;
+    }
+
+    .license-summary-item {
+        width: 100%;
+        min-height: 30px;
+        line-height: 1.2;
+        min-width: 0;
+    }
+
+    .license-tabs {
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        min-height: 520px;
+    }
+
+    .license-tab-scroll {
+        height: 100%;
+        overflow: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .license-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .license-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: var(--mud-palette-surface);
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        box-sizing: border-box;
+    }
+
+    .license-footer-inner {
+        min-width: 0;
+    }
+</style>
+
+@code
+{
+    private const string PermLicensesView = "Assets.Licenses.View";
+    private const string PermLicensesEdit = "Assets.Licenses.Edit";
+
+    [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery] public string? returnUrl { get; set; }
+    [SupplyParameterFromQuery] public int? readonlyMode { get; set; }
+
+    private bool _ready;
+    private bool _loading = true;
+
+    private bool _isNew;
+    private bool _isEditEnabled;
+
+    private bool _isDirty;
+    private string _originalJson = string.Empty;
+
+    private bool _canView;
+    private bool _canEdit;
+
+    private string _errorMessage = string.Empty;
+
+    private MudForm? _form;
+
+    private LicenseUpdateModel _edit = new();
+    private LicenseFilterLookups _lookups = new();
+
+    private LookupItem? _typeSelected;
+    private LookupItem? _statusSelected;
+    private LookupItem? _producerSelected;
+    private LookupItem? _modelSelected;
+    private LookupItem? _userSelected;
+
+    private Adornment LockAdornment => !_isEditEnabled ? Adornment.End : Adornment.None;
+    private string? LockIcon => !_isEditEnabled ? Icons.Material.Filled.Lock : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+
+            var ctx = CurrentUserContextService.CurrentUser;
+            var isAuth = ctx != null && ctx.IsAuthenticated && ctx.IsActive == true;
+            var hasAccess = CurrentUserContextService.HasAccess;
+
+            _canView = isAuth && hasAccess && CurrentUserContextService.Can(PermLicensesView);
+            _canEdit = _canView && CurrentUserContextService.Can(PermLicensesEdit);
+
+            _ready = true;
+
+            if (!_canView)
+                return;
+
+            await LoadLookupsAsync();
+            await LoadAsync();
+
+            if (readonlyMode == 1)
+            {
+                _isEditEnabled = false;
+                if (_canEdit)
+                    Snackbar.Add("Tryb podglądu (readonly=1).", Severity.Info);
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string BuildPageTitle()
+        => _isNew ? L["NewTitle"] : L["License"];
+
+    private async Task LoadLookupsAsync()
+    {
+        try
+        {
+            var res = await LicensesService.GetLicensesFilterLookupsAsync();
+            if (!res.Ok)
+            {
+                _lookups = new LicenseFilterLookups();
+                _errorMessage = res.ErrorMessage ?? L["LookupsLoadFailed"];
+                return;
+            }
+
+            _lookups = res.Lookups ?? new LicenseFilterLookups();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicenseEdit] LoadLookupsAsync error.");
+            _lookups = new LicenseFilterLookups();
+            _errorMessage = L["LookupsLoadFailed"];
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorMessage = string.Empty;
+
+        try
+        {
+            _isNew = Id <= 0;
+
+            if (_isNew)
+            {
+                _edit = new LicenseUpdateModel { Id = 0 };
+                _typeSelected = null;
+                _statusSelected = null;
+                _producerSelected = null;
+                _modelSelected = null;
+                _userSelected = null;
+
+                Snapshot();
+
+                _isEditEnabled = _canEdit;
+                if (!_canEdit)
+                    Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+
+                return;
+            }
+
+            var get = await LicensesService.GetLicenseByIdAsync(Id);
+
+            if (!get.Ok)
+            {
+                _errorMessage = get.ErrorMessage ?? L["LoadFailed"];
+                _edit = new LicenseUpdateModel();
+                Snapshot();
+                _isEditEnabled = false;
+                return;
+            }
+
+            if (get.Row == null)
+            {
+                _errorMessage = string.Format(L["NotFoundFmt"], Id);
+                _edit = new LicenseUpdateModel();
+                Snapshot();
+                _isEditEnabled = false;
+                return;
+            }
+
+            _edit = new LicenseUpdateModel
+            {
+                Id = get.Row.Id,
+                TypeId = get.Row.TypeId,
+                StatusId = get.Row.StatusId,
+                ProducerId = get.Row.ProducerId,
+                ModelId = get.Row.ModelId,
+
+                Name = get.Row.Name ?? string.Empty,
+                InventoryNo = get.Row.InventoryNo ?? string.Empty,
+
+                UserId = get.Row.UserId,
+                UserName = get.Row.User ?? string.Empty,
+
+                SubscriptionStarts = get.Row.SubscriptionStarts,
+                SubscriptionEnds = get.Row.SubscriptionEnds,
+
+                Note = get.Row.Note ?? string.Empty
+            };
+
+            _typeSelected = FindById(_lookups.Types, _edit.TypeId);
+            _statusSelected = FindById(_lookups.Statuses, _edit.StatusId);
+            _producerSelected = FindById(_lookups.Producers, _edit.ProducerId);
+            _modelSelected = FindById(_lookups.Models, _edit.ModelId);
+            _userSelected = FindById(_lookups.Users, _edit.UserId);
+
+            Snapshot();
+            _isEditEnabled = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicenseEdit] LoadAsync error. Id={Id}", Id);
+            _errorMessage = L["LoadFailedTryLater"];
+            _edit = new LicenseUpdateModel();
+            Snapshot();
+            _isEditEnabled = false;
+        }
+    }
+
+    private void ToggleEditMode()
+    {
+        if (_loading || !_canEdit)
+            return;
+
+        _isEditEnabled = !_isEditEnabled;
+
+        if (!_isEditEnabled)
+            RevertChanges();
+    }
+
+    private string BuildTitle()
+    {
+        if (_isNew || _edit.Id <= 0)
+            return L["NewTitle"];
+
+        var name = Safe(_edit.Name);
+        if (!string.IsNullOrWhiteSpace(name))
+            return name;
+
+        var inv = Safe(_edit.InventoryNo);
+        if (!string.IsNullOrWhiteSpace(inv))
+            return $"{L["License"]} {inv}";
+
+        return L["License"];
+    }
+
+    private string BuildSubtitle()
+    {
+        var parts = new List<string>();
+
+        var producer = Safe(SelectedProducerName());
+        var model = Safe(SelectedModelName());
+        var user = Safe(SelectedUserName());
+
+        var left = string.Join(" ", new[] { producer, model }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+        if (!string.IsNullOrWhiteSpace(left))
+            parts.Add(left);
+
+        if (!string.IsNullOrWhiteSpace(user))
+            parts.Add(string.Format(L["SubtitleUserFmt"], user));
+
+        if (parts.Count == 0)
+            return L["SubtitleDefault"];
+
+        return string.Join(" | ", parts);
+    }
+
+    private Color GetStatusColor(string? status)
+    {
+        var s = (status ?? string.Empty).Trim();
+
+        if (s.Equals("Active", StringComparison.OrdinalIgnoreCase))
+            return Color.Success;
+
+        if (s.Equals("Expired", StringComparison.OrdinalIgnoreCase))
+            return Color.Error;
+
+        return Color.Default;
+    }
+
+    private void Snapshot()
+    {
+        var snap = new SnapshotModel
+        {
+            Edit = _edit ?? new LicenseUpdateModel(),
+            TypeSelectedId = _typeSelected?.Id,
+            StatusSelectedId = _statusSelected?.Id,
+            ProducerSelectedId = _producerSelected?.Id,
+            ModelSelectedId = _modelSelected?.Id,
+            UserSelectedId = _userSelected?.Id
+        };
+
+        _originalJson = JsonSerializer.Serialize(snap, new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = null
+        });
+
+        _isDirty = false;
+    }
+
+    private void MarkDirty()
+    {
+        if (string.IsNullOrWhiteSpace(_originalJson))
+        {
+            _isDirty = true;
+            return;
+        }
+
+        var snap = new SnapshotModel
+        {
+            Edit = _edit ?? new LicenseUpdateModel(),
+            TypeSelectedId = _typeSelected?.Id,
+            StatusSelectedId = _statusSelected?.Id,
+            ProducerSelectedId = _producerSelected?.Id,
+            ModelSelectedId = _modelSelected?.Id,
+            UserSelectedId = _userSelected?.Id
+        };
+
+        var current = JsonSerializer.Serialize(snap, new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = null
+        });
+
+        _isDirty = !string.Equals(_originalJson, current, StringComparison.Ordinal);
+    }
+
+    private void SetEditString(Action<string> setter, string? value)
+    {
+        setter(value ?? string.Empty);
+        MarkDirty();
+    }
+
+    private void SetEditDate(Action<DateTime?> setter, DateTime? value)
+    {
+        setter(value);
+        MarkDirty();
+    }
+
+    private void RevertChanges()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_originalJson))
+                return;
+
+            var restored = JsonSerializer.Deserialize<SnapshotModel>(_originalJson);
+            if (restored == null)
+                return;
+
+            _edit = restored.Edit ?? new LicenseUpdateModel();
+
+            _typeSelected = FindById(_lookups.Types, restored.TypeSelectedId);
+            _statusSelected = FindById(_lookups.Statuses, restored.StatusSelectedId);
+            _producerSelected = FindById(_lookups.Producers, restored.ProducerSelectedId);
+            _modelSelected = FindById(_lookups.Models, restored.ModelSelectedId);
+            _userSelected = FindById(_lookups.Users, restored.UserSelectedId);
+
+            _isDirty = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicenseEdit] RevertChanges error.");
+            Snackbar.Add(L["RevertFailed"], Severity.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_canView || !_canEdit)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return;
+        }
+
+        if (!_isEditEnabled || _loading || !_isDirty)
+            return;
+
+        _loading = true;
+
+        try
+        {
+            if (_form != null)
+                await _form.Validate();
+
+            var payload = new LicenseUpdateModel
+            {
+                Id = _isNew ? 0 : _edit.Id,
+
+                TypeId = _typeSelected?.Id,
+                StatusId = _statusSelected?.Id,
+                ProducerId = _producerSelected?.Id,
+                ModelId = _modelSelected?.Id,
+
+                Name = Safe(_edit.Name),
+                InventoryNo = Safe(_edit.InventoryNo),
+
+                UserId = _userSelected?.Id,
+                UserName = Safe(_userSelected?.Name),
+
+                SubscriptionStarts = _edit.SubscriptionStarts,
+                SubscriptionEnds = _edit.SubscriptionEnds,
+
+                Note = _edit.Note ?? string.Empty
+            };
+
+            if (_isNew || payload.Id <= 0)
+            {
+                var created = await LicensesService.CreateLicenseAsync(payload);
+                if (!created.Ok)
+                {
+                    Snackbar.Add(created.ErrorMessage ?? L["SaveFailed"], Severity.Error);
+                    return;
+                }
+
+                Snackbar.Add(L["Saved"], Severity.Success);
+                _isDirty = false;
+                NavigateBack();
+                return;
+            }
+
+            var updated = await LicensesService.UpdateLicenseAsync(payload);
+            if (!updated.Ok)
+            {
+                Snackbar.Add(updated.ErrorMessage ?? L["SaveFailed"], Severity.Error);
+                return;
+            }
+
+            Snackbar.Add(L["Saved"], Severity.Success);
+            _isDirty = false;
+            NavigateBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicenseEdit] SaveAsync error. Id={Id}", Id);
+            Snackbar.Add(L["SaveError"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task BackAsync()
+    {
+        if (_loading)
+            return;
+
+        if (_isEditEnabled && _isDirty)
+        {
+            var discard = await DialogService.ShowMessageBox(
+                title: L["UnsavedTitle"],
+                message: L["UnsavedMessage"],
+                yesText: L["DiscardAndClose"],
+                cancelText: L["Stay"]
+            );
+
+            if (discard != true)
+                return;
+        }
+
+        NavigateBack();
+    }
+
+    private void NavigateBack()
+    {
+        var target = Safe(returnUrl);
+        if (!string.IsNullOrWhiteSpace(target))
+        {
+            NavigationManager.NavigateTo(target);
+            return;
+        }
+
+        NavigationManager.NavigateTo("/assets/licenses");
+    }
+
+    private async Task CopyToClipboardAsync(string? value, string label)
+    {
+        var v = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(v))
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", v);
+            Snackbar.Add(string.Format(L["CopiedFmt"], label), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[LicenseEdit] CopyToClipboardAsync failed.");
+            Snackbar.Add(L["CopyFailed"], Severity.Error);
+        }
+    }
+
+    private static Task<IEnumerable<LookupItem>> SearchLookupAsync(List<LookupItem> options, string? search, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var list = options ?? new List<LookupItem>();
+        var s = (search ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(s))
+            return Task.FromResult<IEnumerable<LookupItem>>(list);
+
+        var filtered = list
+            .Where(x => x != null && !string.IsNullOrWhiteSpace(x.Name) && x.Name.Contains(s, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<LookupItem>>(filtered);
+    }
+
+    private void OnTypeChanged(LookupItem? v)
+    {
+        _typeSelected = v;
+        MarkDirty();
+    }
+
+    private void OnStatusChanged(LookupItem? v)
+    {
+        _statusSelected = v;
+        MarkDirty();
+    }
+
+    private void OnProducerChanged(LookupItem? v)
+    {
+        _producerSelected = v;
+        MarkDirty();
+    }
+
+    private void OnModelChanged(LookupItem? v)
+    {
+        _modelSelected = v;
+        MarkDirty();
+    }
+
+    private void OnUserChanged(LookupItem? v)
+    {
+        _userSelected = v;
+        MarkDirty();
+    }
+
+    private static LookupItem? FindById(List<LookupItem> list, int? id)
+    {
+        if (id == null || id.Value <= 0)
+            return null;
+
+        return (list ?? new List<LookupItem>()).FirstOrDefault(x => x != null && x.Id == id.Value);
+    }
+
+    private string SelectedTypeName() => _typeSelected?.Name ?? string.Empty;
+    private string SelectedStatusName() => _statusSelected?.Name ?? string.Empty;
+    private string SelectedProducerName() => _producerSelected?.Name ?? string.Empty;
+    private string SelectedModelName() => _modelSelected?.Name ?? string.Empty;
+
+    private string SelectedUserName()
+    {
+        if (_userSelected != null && !string.IsNullOrWhiteSpace(_userSelected.Name))
+            return _userSelected.Name;
+
+        return Safe(_edit.UserName);
+    }
+
+    private static string Safe(string? value, string fallback = "")
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? fallback : v;
+    }
+
+    private sealed class SnapshotModel
+    {
+        public LicenseUpdateModel? Edit { get; set; }
+
+        public int? TypeSelectedId { get; set; }
+        public int? StatusSelectedId { get; set; }
+        public int? ProducerSelectedId { get; set; }
+        public int? ModelSelectedId { get; set; }
+        public int? UserSelectedId { get; set; }
+    }
+}

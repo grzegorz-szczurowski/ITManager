@@ -1,0 +1,126 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>New tickets</value>
+  </data>
+
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Search in title, requester, description, solution</value>
+  </data>
+
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Clear filters</value>
+  </data>
+
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Advanced filters</value>
+  </data>
+
+	<data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+
+	<data name="Loading" xml:space="preserve">
+    <value>Loading data...</value>
+  </data>
+
+	<data name="NoRecords" xml:space="preserve">
+    <value>No new tickets found.</value>
+  </data>
+
+	<!-- Permissions / errors -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view the ticket queue.</value>
+  </data>
+
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>You do not have permission to handle tickets.</value>
+  </data>
+
+	<data name="LoadError" xml:space="preserve">
+    <value>Failed to load ticket queue. Please try again later.</value>
+  </data>
+
+	<data name="LoadError_Inline" xml:space="preserve">
+    <value>Error while loading data.</value>
+  </data>
+
+	<!-- Filters -->
+	<data name="PriorityLabel" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+
+	<data name="RequesterLabel" xml:space="preserve">
+    <value>Requester</value>
+  </data>
+
+	<data name="RequestDateLabel" xml:space="preserve">
+    <value>Request date</value>
+  </data>
+
+	<!-- Grid columns -->
+	<data name="ColTicketNo" xml:space="preserve">
+    <value>Ticket #</value>
+  </data>
+
+	<data name="ColDate" xml:space="preserve">
+    <value>Date</value>
+  </data>
+
+	<data name="ColRequester" xml:space="preserve">
+    <value>Requester</value>
+  </data>
+
+	<data name="ColTitle" xml:space="preserve">
+    <value>Title</value>
+  </data>
+
+	<data name="ColPriority" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+
+	<data name="ColStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<data name="ColActions" xml:space="preserve">
+    <value>Actions</value>
+  </data>
+
+	<!-- Priority -->
+	<data name="PriorityFallback" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+
+	<!-- Actions -->
+	<data name="AssignToMe" xml:space="preserve">
+    <value>Assign to me</value>
+  </data>
+
+	<data name="Msg_AssignedToMe" xml:space="preserve">
+    <value>Ticket #{0} assigned to you.</value>
+  </data>
+
+	<data name="NoAssignPermission" xml:space="preserve">
+    <value>You do not have permission to assign tickets.</value>
+  </data>
+
+	<data name="AssignError" xml:space="preserve">
+    <value>Failed to assign the ticket. Please try again.</value>
+  </data>
+
+</root>

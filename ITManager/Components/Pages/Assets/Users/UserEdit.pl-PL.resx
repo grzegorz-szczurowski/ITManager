@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="metadata">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" />
+							</xsd:sequence>
+							<xsd:attribute name="name" use="required" type="xsd:string" />
+							<xsd:attribute name="type" type="xsd:string" />
+							<xsd:attribute name="mimetype" type="xsd:string" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="assembly">
+						<xsd:complexType>
+							<xsd:attribute name="alias" type="xsd:string" />
+							<xsd:attribute name="name" type="xsd:string" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<!-- Dialog / status -->
+	<data name="DialogTitleFallback" xml:space="preserve">
+    <value>Użytkownik</value>
+  </data>
+	<data name="LoadingData" xml:space="preserve">
+    <value>Wczytywanie danych...</value>
+  </data>
+	<data name="InvalidIdError" xml:space="preserve">
+    <value>Nieprawidłowy identyfikator użytkownika.</value>
+  </data>
+	<data name="LoadFailedTryLater" xml:space="preserve">
+    <value>Nie udało się wczytać danych. Spróbuj ponownie później.</value>
+  </data>
+	<data name="Saved" xml:space="preserve">
+    <value>Zapisano zmiany.</value>
+  </data>
+	<data name="SaveFailedTryLater" xml:space="preserve">
+    <value>Nie udało się zapisać zmian. Spróbuj ponownie później.</value>
+  </data>
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>Brak uprawnień do edycji.</value>
+  </data>
+
+	<data name="AccountActive" xml:space="preserve">
+    <value>Aktywne</value>
+  </data>
+	<data name="AccountInactive" xml:space="preserve">
+    <value>Nieaktywne</value>
+  </data>
+
+	<!-- Validation -->
+	<data name="Validation.FormInvalid" xml:space="preserve">
+    <value>Formularz zawiera błędy. Popraw pola oznaczone na czerwono.</value>
+  </data>
+
+	<!-- Tabs -->
+	<data name="Tab.Details" xml:space="preserve">
+    <value>Szczegóły</value>
+  </data>
+	<data name="Tab.Equipment" xml:space="preserve">
+    <value>Sprzęt</value>
+  </data>
+	<data name="Tab.Tickets" xml:space="preserve">
+    <value>Zgłoszenia</value>
+  </data>
+
+	<!-- Fields -->
+	<data name="Field.DisplayName" xml:space="preserve">
+    <value>Nazwa</value>
+  </data>
+	<data name="Field.Email" xml:space="preserve">
+    <value>E-mail</value>
+  </data>
+	<data name="Field.Phone" xml:space="preserve">
+    <value>Telefon</value>
+  </data>
+	<data name="Field.Mobile" xml:space="preserve">
+    <value>Telefon komórkowy</value>
+  </data>
+	<data name="Field.Department" xml:space="preserve">
+    <value>Dział</value>
+  </data>
+	<data name="Field.Title" xml:space="preserve">
+    <value>Stanowisko</value>
+  </data>
+	<data name="Field.AccountType" xml:space="preserve">
+    <value>Typ konta</value>
+  </data>
+
+	<!-- Equipment tab -->
+	<data name="Equipment.Title" xml:space="preserve">
+    <value>Powiązany sprzęt</value>
+  </data>
+	<data name="Equipment.Col.Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+	<data name="Equipment.Col.Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Equipment.Col.SerialNumber" xml:space="preserve">
+    <value>SN</value>
+  </data>
+	<data name="Equipment.Col.AssetTag" xml:space="preserve">
+    <value>Asset tag</value>
+  </data>
+	<data name="Equipment.Col.Location" xml:space="preserve">
+    <value>Lokalizacja</value>
+  </data>
+	<data name="Equipment.Col.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Equipment.NoRecords" xml:space="preserve">
+    <value>Brak rekordów.</value>
+  </data>
+	<data name="Equipment.OpenList.NotImplemented" xml:space="preserve">
+    <value>Lista sprzętu nie jest jeszcze dostępna.</value>
+  </data>
+
+	<!-- Tickets tab -->
+	<data name="Tickets.Title" xml:space="preserve">
+    <value>Powiązane zgłoszenia</value>
+  </data>
+	<data name="Tickets.Col.TicketNo" xml:space="preserve">
+    <value>Nr</value>
+  </data>
+	<data name="Tickets.Col.Title" xml:space="preserve">
+    <value>Tytuł</value>
+  </data>
+	<data name="Tickets.Col.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Tickets.Col.Priority" xml:space="preserve">
+    <value>Priorytet</value>
+  </data>
+	<data name="Tickets.Col.Updated" xml:space="preserve">
+    <value>Aktualizacja</value>
+  </data>
+	<data name="Tickets.NoRecords" xml:space="preserve">
+    <value>Brak zgłoszeń.</value>
+  </data>
+	<data name="Tickets.OpenList.NotImplemented" xml:space="preserve">
+    <value>Lista zgłoszeń nie jest jeszcze dostępna.</value>
+  </data>
+
+	<!-- Dodatkowe klucze (na przyszłość, obecnie w kodzie są literały) -->
+	<data name="Button.Lock" xml:space="preserve">
+    <value>Zablokuj</value>
+  </data>
+	<data name="Button.EnableEdit" xml:space="preserve">
+    <value>Włącz edycję</value>
+  </data>
+	<data name="Button.CancelChanges" xml:space="preserve">
+    <value>Anuluj zmiany</value>
+  </data>
+	<data name="Button.Save" xml:space="preserve">
+    <value>Zapisz</value>
+  </data>
+	<data name="Button.Close" xml:space="preserve">
+    <value>Zamknij</value>
+  </data>
+
+	<data name="Dialog.UnsavedChanges.Title" xml:space="preserve">
+    <value>Niezapisane zmiany</value>
+  </data>
+	<data name="Dialog.UnsavedChanges.Message" xml:space="preserve">
+    <value>Masz niezapisane zmiany. Zamknąć okno i odrzucić zmiany?</value>
+  </data>
+	<data name="Dialog.UnsavedChanges.Yes" xml:space="preserve">
+    <value>Odrzuć i zamknij</value>
+  </data>
+	<data name="Dialog.UnsavedChanges.Cancel" xml:space="preserve">
+    <value>Zostań</value>
+  </data>
+</root>

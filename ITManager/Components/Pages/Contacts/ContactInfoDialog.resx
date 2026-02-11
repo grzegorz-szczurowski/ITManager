@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Ui.LoadingContact" xml:space="preserve">
+    <value>Loading contact data</value>
+  </data>
+	<data name="Ui.ContactDetailsHeader" xml:space="preserve">
+    <value>Contact details</value>
+  </data>
+
+	<data name="Field.FirstName" xml:space="preserve">
+    <value>First name</value>
+  </data>
+	<data name="Field.LastName" xml:space="preserve">
+    <value>Last name</value>
+  </data>
+	<data name="Field.Department" xml:space="preserve">
+    <value>Department</value>
+  </data>
+	<data name="Field.JobTitle" xml:space="preserve">
+    <value>Job title</value>
+  </data>
+	<data name="Field.PhoneInternal" xml:space="preserve">
+    <value>Internal phone</value>
+  </data>
+	<data name="Field.PhoneLandline" xml:space="preserve">
+    <value>Landline</value>
+  </data>
+	<data name="Field.PhoneMobile" xml:space="preserve">
+    <value>Mobile phone</value>
+  </data>
+	<data name="Field.Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+	<data name="Field.Company" xml:space="preserve">
+    <value>Company</value>
+  </data>
+
+	<data name="Ui.QrHeader" xml:space="preserve">
+    <value>QR business card</value>
+  </data>
+	<data name="Ui.QrAlt" xml:space="preserve">
+    <value>Contact QR</value>
+  </data>
+	<data name="Ui.QrNoData" xml:space="preserve">
+    <value>No data to generate QR.</value>
+  </data>
+	<data name="Ui.QrHint" xml:space="preserve">
+    <value>Scan with your phone to add the contact.</value>
+  </data>
+
+	<data name="Ui.NoDataToShow" xml:space="preserve">
+    <value>No data to display.</value>
+  </data>
+
+	<data name="Action.Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+
+	<data name="Errors.MissingEmail" xml:space="preserve">
+    <value>Missing contact email address.</value>
+  </data>
+	<data name="Errors.ContactNotFound" xml:space="preserve">
+    <value>Contact not found.</value>
+  </data>
+	<data name="Errors.LoadContactFailed" xml:space="preserve">
+    <value>An error occurred while loading contact data.</value>
+  </data>
+
+	<data name="Errors.LoadContactLogPrefix" xml:space="preserve">
+    <value>Contact load error:</value>
+  </data>
+	<data name="Errors.QrGenerationLogPrefix" xml:space="preserve">
+    <value>QR generation error:</value>
+  </data>
+</root>

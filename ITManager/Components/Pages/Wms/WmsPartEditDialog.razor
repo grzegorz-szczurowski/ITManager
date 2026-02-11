@@ -1,0 +1,244 @@
+﻿@using MudBlazor
+@using ITManager.Models.Wms
+@using ITManager.Services.Wms
+
+@inject WmsPartsRepository PartsRepository
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+
+            @if (_isLoading)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudProgressCircular Indeterminate="true" />
+                    <MudText>Ładowanie</MudText>
+                </MudStack>
+            }
+            else
+            {
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string"
+                                      Label="System number"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      Required="true"
+                                      Immediate="true"
+                                      Value="@(_model.SystemNumber ?? string.Empty)"
+                                      ValueChanged="OnSystemNumberChangedAsync"
+                                      Error="_hasSystemNumberError"
+                                      ErrorText="_systemNumberErrorText" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string"
+                                      Label="Short system number"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      Disabled="true"
+                                      Value="@(_model.ShortSystemNumber ?? string.Empty)" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        <MudTextField T="string"
+                                      Label="Nazwa części"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      Required="true"
+                                      @bind-Value="_model.PartName"
+                                      Error="_hasPartNameError"
+                                      ErrorText="Pole jest wymagane." />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="decimal?"
+                                         Label="Waga"
+                                         Variant="Variant.Outlined"
+                                         Margin="Margin.Dense"
+                                         @bind-Value="_model.PartWeight" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int?"
+                                         Label="Max w pojemniku"
+                                         Variant="Variant.Outlined"
+                                         Margin="Margin.Dense"
+                                         @bind-Value="_model.MaxQuantityPerContainer" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        <MudSelect T="int?" Label="Jednostka miary"
+                                   Variant="Variant.Outlined"
+                                   Margin="Margin.Dense"
+                                   @bind-Value="_model.UnitOfMeasureId">
+                            <MudSelectItem Value="@((int?)null)">Brak</MudSelectItem>
+                            @foreach (var u in _units)
+                            {
+                                <MudSelectItem Value="@((int?)u.Id)">@($"{u.Name} ({u.Symbol})")</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudTextField T="string"
+                                      Label="Notatka"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      Lines="4"
+                                      @bind-Value="_model.Note" />
+                    </MudItem>
+                </MudGrid>
+
+                @if (!string.IsNullOrWhiteSpace(_saveError))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">@_saveError</MudAlert>
+                }
+            }
+
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Anuluj</MudButton>
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="_isSaving || _isLoading"
+                   OnClick="SaveAsync">
+            Zapisz
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int PartId { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSaving;
+
+    private string? _saveError;
+
+    private bool _hasSystemNumberError;
+    private string? _systemNumberErrorText;
+    private bool _hasPartNameError;
+
+    private WmsAssemblyPartEditDto _model = new();
+    private List<WmsUnitOfMeasureDto> _units = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        try
+        {
+            _units = await PartsRepository.GetUnitsAsync(CancellationToken.None);
+
+            if (PartId > 0)
+            {
+                var dbModel = await PartsRepository.GetPartByIdAsync(PartId, CancellationToken.None);
+                if (dbModel is null)
+                {
+                    _saveError = "Nie znaleziono rekordu do edycji.";
+                    _model = new WmsAssemblyPartEditDto();
+                }
+                else
+                {
+                    _model = dbModel;
+                    _model.ShortSystemNumber = CalculateShortSystemNumber(_model.SystemNumber) ?? _model.ShortSystemNumber;
+                }
+            }
+            else
+            {
+                _model = new WmsAssemblyPartEditDto();
+            }
+        }
+        catch
+        {
+            _saveError = "Nie udało się wczytać danych dialogu.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private Task OnSystemNumberChangedAsync(string value)
+    {
+        _model.SystemNumber = value ?? string.Empty;
+        _model.ShortSystemNumber = CalculateShortSystemNumber(_model.SystemNumber);
+        ClearValidationErrors();
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = null;
+        ClearValidationErrors();
+
+        if (!Validate())
+            return;
+
+        _isSaving = true;
+
+        try
+        {
+            var (success, error) = await PartsRepository.UpsertPartAsync(_model, CancellationToken.None);
+            if (!success)
+            {
+                _saveError = error ?? "Nie udało się zapisać.";
+                Snackbar.Add(_saveError, Severity.Error);
+                return;
+            }
+
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private bool Validate()
+    {
+        var ok = true;
+
+        if (string.IsNullOrWhiteSpace(_model.SystemNumber))
+        {
+            _hasSystemNumberError = true;
+            _systemNumberErrorText = "Pole jest wymagane.";
+            ok = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.PartName))
+        {
+            _hasPartNameError = true;
+            ok = false;
+        }
+
+        return ok;
+    }
+
+    private void ClearValidationErrors()
+    {
+        _hasSystemNumberError = false;
+        _systemNumberErrorText = null;
+        _hasPartNameError = false;
+    }
+
+    private static string? CalculateShortSystemNumber(string? systemNumber)
+    {
+        if (string.IsNullOrWhiteSpace(systemNumber))
+            return null;
+
+        var text = systemNumber.Trim();
+        if (text.Length < 9)
+            return null;
+
+        return text.Substring(3, text.Length - 6);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

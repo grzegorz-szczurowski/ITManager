@@ -1,0 +1,162 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Common.Null" xml:space="preserve">
+    <value>n/a</value>
+  </data>
+
+	<data name="NoAccess.Message" xml:space="preserve">
+    <value>No access to the application.</value>
+  </data>
+	<data name="NoAccess.Details" xml:space="preserve">
+    <value>Login: {0}. ObjectGUID: {1}. Active: {2}.</value>
+  </data>
+
+	<data name="NoModules.Message" xml:space="preserve">
+    <value>No modules available in the menu.</value>
+  </data>
+
+	<data name="Queue.Loading" xml:space="preserve">
+    <value>Loading</value>
+  </data>
+
+	<data name="Dialog.UnknownKey" xml:space="preserve">
+    <value>Unknown dialog key: {0}.</value>
+  </data>
+	<data name="Dialog.CannotOpen" xml:space="preserve">
+    <value>Could not open the dialog.</value>
+  </data>
+
+	<data name="Section.overview" xml:space="preserve">
+    <value>Overview</value>
+  </data>
+	<data name="Section.my-workspace" xml:space="preserve">
+    <value>My workspace</value>
+  </data>
+	<data name="Section.tickets" xml:space="preserve">
+    <value>Tickets</value>
+  </data>
+	<data name="Section.projects" xml:space="preserve">
+    <value>Projects</value>
+  </data>
+	<data name="Section.security-center" xml:space="preserve">
+    <value>Security Center</value>
+  </data>
+	<data name="Section.it-resources" xml:space="preserve">
+    <value>IT Resources</value>
+  </data>
+	<data name="Section.operations" xml:space="preserve">
+    <value>Operations</value>
+  </data>
+	<data name="Section.administration" xml:space="preserve">
+    <value>Administration</value>
+  </data>
+	<data name="Section.system-settings" xml:space="preserve">
+    <value>System settings</value>
+  </data>
+
+	<data name="Item.Dashboards" xml:space="preserve">
+    <value>Dashboards</value>
+  </data>
+	<data name="Item.Reports" xml:space="preserve">
+    <value>Reports</value>
+  </data>
+	<data name="Item.Systems status" xml:space="preserve">
+    <value>Systems status</value>
+  </data>
+	<data name="Item.Contacts" xml:space="preserve">
+    <value>Contacts</value>
+  </data>
+
+	<data name="Item.Create ticket" xml:space="preserve">
+    <value>Create ticket</value>
+  </data>
+	<data name="Item.My tickets" xml:space="preserve">
+    <value>My tickets</value>
+  </data>
+	<data name="Item.My team's tickets" xml:space="preserve">
+    <value>My team's tickets</value>
+  </data>
+	<data name="Item.My IT equipment" xml:space="preserve">
+    <value>My IT equipment</value>
+  </data>
+
+	<data name="Item.New tickets" xml:space="preserve">
+    <value>New tickets</value>
+  </data>
+	<data name="Item.Assigned to me" xml:space="preserve">
+    <value>Assigned to me</value>
+  </data>
+	<data name="Item.All" xml:space="preserve">
+    <value>All</value>
+  </data>
+	<data name="Item.Ticket scheduler" xml:space="preserve">
+    <value>Ticket scheduler</value>
+  </data>
+
+	<data name="Item.Projects list" xml:space="preserve">
+    <value>Projects list</value>
+  </data>
+
+	<data name="Item.Backups" xml:space="preserve">
+    <value>Backups</value>
+  </data>
+
+	<data name="Item.Devices" xml:space="preserve">
+    <value>Devices</value>
+  </data>
+	<data name="Item.Licenses" xml:space="preserve">
+    <value>Licenses</value>
+  </data>
+	<data name="Item.Systems" xml:space="preserve">
+    <value>Systems</value>
+  </data>
+	<data name="Item.SIM cards" xml:space="preserve">
+    <value>SIM cards</value>
+  </data>
+	<data name="Item.Agreements" xml:space="preserve">
+    <value>Agreements</value>
+  </data>
+	<data name="Item.Users" xml:space="preserve">
+    <value>Users</value>
+  </data>
+
+	<data name="Item.Parts Finder" xml:space="preserve">
+    <value>Parts Finder</value>
+  </data>
+	<data name="Item.Containers" xml:space="preserve">
+    <value>Containers</value>
+  </data>
+	<data name="Item.Warehouse tools" xml:space="preserve">
+    <value>Warehouse tools</value>
+  </data>
+
+	<data name="Item.Users &amp; roles" xml:space="preserve">
+    <value>Users and roles</value>
+  </data>
+	<data name="Item.Permissions" xml:space="preserve">
+    <value>Permissions</value>
+  </data>
+	<data name="Item.Dictionaries" xml:space="preserve">
+    <value>Dictionaries</value>
+  </data>
+
+	<data name="Item.System" xml:space="preserve">
+    <value>System</value>
+  </data>
+	<data name="Item.Profile" xml:space="preserve">
+    <value>Profile</value>
+  </data>
+</root>

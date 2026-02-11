@@ -1,0 +1,60 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using static Microsoft.AspNetCore.Components.Web.RenderMode
+
+@* File: Components/App.razor
+   Updated: 2026-01-09 - Windows only: CascadingAuthenticationState dla AuthorizeRouteView.
+   Updated: 2026-01-26 - CSS order: MudBlazor i generated CSS przed app.css, żeby nasze nadpisania wygrywały.
+*@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="/" />
+
+    <title>ITManager</title>
+
+    <link rel="stylesheet" href="/_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="ITManager.styles.css" />
+    <link rel="stylesheet" href="app.css" />
+
+    <style>
+        body.app-light {
+            background: #F5F5F5;
+            color: #333333;
+        }
+
+        body.app-dark {
+            background: #121212;
+            color: #FFFFFF;
+        }
+    </style>
+
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body class="app-light">
+
+    <script>
+        (function () {
+            try {
+                var key = "tristonehub-darkmode";
+                var v = localStorage.getItem(key);
+                var isDark = (v === "true");
+
+                document.body.classList.remove("app-light");
+                document.body.classList.remove("app-dark");
+                document.body.classList.add(isDark ? "app-dark" : "app-light");
+            } catch (e) { }
+        })();
+    </script>
+
+    <CascadingAuthenticationState>
+        <Routes @rendermode="InteractiveServer" />
+    </CascadingAuthenticationState>
+
+    <script src="_framework/blazor.web.js"></script>
+    <script src="/_content/MudBlazor/MudBlazor.min.js"></script>
+</body>
+</html>

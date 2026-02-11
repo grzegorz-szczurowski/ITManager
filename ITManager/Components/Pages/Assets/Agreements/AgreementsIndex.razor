@@ -1,0 +1,757 @@
+﻿@page "/assets/agreements"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "Perm:Assets.Agreements.View")]
+
+@* File: Components/Pages/AgreementsIndex.razor
+   Description: Lista agreements (IT Resources) w oparciu o MudDataGrid, spójna wizualnie z Devices/Users.
+                Search zawsze widoczny + Advanced filters (collapse).
+                Filtry dopasowane do agreements: Type, Supplier, Owner, Status, Validity.
+   Updated: 2026-01-23 - wersja 1.14:
+     - UX: brak redirecta na / przy braku view, pokazujemy komunikat na stronie
+     - Grid: standard szerokości kolumn jak UsersIndex: procenty + table-layout fixed + ellipsis (dopasowanie do obszaru)
+   Updated: 2026-01-24 - wersja 1.15:
+     - TZ: Validity (Active/Expired/Ends soon) liczone względem "dzisiaj" w strefie użytkownika (TimeZoneService)
+   Updated: 2026-01-25 - wersja 1.16:
+     - RBAC: @attribute Authorize (Perm:Assets.Agreements.View) + spójne liczenie perms przez CurrentUserContextService
+     - Logging: ILogger zamiast Console.Error
+   Updated: 2026-02-08 - wersja 1.17:
+     - RBAC UX: klik w wiersz otwiera szczegóły tylko gdy user ma Assets.Agreements.Edit
+               (bez trybu readonly i bez nawigacji dla braku Edit, dokładnie jak w Devices)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+@using Microsoft.Extensions.Logging
+
+@inject AgreementsService AgreementsService
+@inject NavigationManager NavigationManager
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject TimeZoneService TimeZoneService
+@inject ILogger<AgreementsIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* Tytuł + refresh (ikona) + wyszukiwarka w jednej linii *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">Agreements</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_isLoading || !_canViewAgreements)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="Search in agreements"
+                              Immediate="true"
+                              Disabled="@(_isLoading || !_canViewAgreements)"
+                              Class="agreements-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 agreements-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_isLoading || !_canViewAgreements)">
+                    Clear filters
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_isLoading || !_canViewAgreements)">
+                    Advanced filters
+                </MudButton>
+
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewAgreements)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                Brak uprawnień do podglądu agreements.
+            </MudAlert>
+        }
+        else
+        {
+            @* Kontener treści listy: overlay ma zasłaniać tylko ten obszar *@
+            <div class="agreements-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 agreements-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="Type"
+                                           Value="@_selectedType"
+                                           ValueChanged="OnTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_isLoading">
+                                    <MudSelectItem Value="@AllValue">All</MudSelectItem>
+                                    @foreach (var v in _lookupsTypes)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="Supplier"
+                                           Value="@_selectedSupplier"
+                                           ValueChanged="OnSupplierChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_isLoading">
+                                    <MudSelectItem Value="@AllValue">All</MudSelectItem>
+                                    @foreach (var v in _lookupsSuppliers)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="Owner"
+                                           Value="@_selectedOwner"
+                                           ValueChanged="OnOwnerChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_isLoading">
+                                    <MudSelectItem Value="@AllValue">All</MudSelectItem>
+                                    @foreach (var v in _lookupsOwners)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="Status"
+                                           Value="@_selectedStatus"
+                                           ValueChanged="OnStatusChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_isLoading">
+                                    <MudSelectItem Value="@AllValue">All</MudSelectItem>
+                                    @foreach (var v in _lookupsStatuses)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="Validity"
+                                           Value="@_selectedValidity"
+                                           ValueChanged="OnValidityChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="@_isLoading">
+                                    <MudSelectItem Value="@AllValue">All</MudSelectItem>
+                                    <MudSelectItem Value="@ValActive">Active</MudSelectItem>
+                                    <MudSelectItem Value="@ValExpired">Expired</MudSelectItem>
+                                    <MudSelectItem Value="@ValEndsSoon">Ends soon (30 days)</MudSelectItem>
+                                    <MudSelectItem Value="@ValNoDates">No dates</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudDataGrid T="AgreementListRow"
+                             Class="agreements-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             RowClick="OnRowClickAsync"
+                             @bind-RowsPerPage="_rowsPerPage">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="AgreementListRow" PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        @* Procenty + table-layout: fixed => dopasowanie do obszaru jak UsersIndex *@
+                        <PropertyColumn Property="x => x.AgreementName"
+                                        Title="Agreement name"
+                                        Sortable="true"
+                                        HeaderStyle="width:28%;"
+                                        CellStyle="width:28%;" />
+
+                        <PropertyColumn Property="x => x.AgreementType"
+                                        Title="Type"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.Supplier"
+                                        Title="Supplier"
+                                        Sortable="true"
+                                        HeaderStyle="width:16%;"
+                                        CellStyle="width:16%;" />
+
+                        <PropertyColumn Property="x => x.Owner"
+                                        Title="Owner"
+                                        Sortable="true"
+                                        HeaderStyle="width:16%;"
+                                        CellStyle="width:16%;" />
+
+                        <TemplateColumn Title="Valid from"
+                                        SortBy="@(x => ParseDateSafe(x.ValidFrom))"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;">
+                            <CellTemplate Context="context">
+                                @FormatDateSafe(context.Item?.ValidFrom)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <TemplateColumn Title="Valid to"
+                                        SortBy="@(x => ParseDateSafe(x.ValidTo))"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;">
+                            <CellTemplate Context="context">
+                                @FormatDateSafe(context.Item?.ValidTo)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.Status"
+                                        Title="Status"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            No agreements found for current filters.
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                @* Overlay wewnątrz kontenera listy, nie na całej stronie *@
+                <MudOverlay Visible="@_isLoading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="agreements-overlay">
+                    <MudPaper Class="pa-6 agreements-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                Ładowanie danych...
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .agreement-row {
+        min-height: 44px;
+    }
+
+        .agreement-row td,
+        .agreement-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .agreement-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .agreement-row-clickable {
+        cursor: pointer;
+    }
+
+    .agreements-search {
+        min-width: 400px;
+    }
+
+    .agreements-filters-panel {
+        border-radius: 8px;
+    }
+
+    .agreements-clear-btn {
+        border-width: 1px;
+    }
+
+    .agreements-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .agreements-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .agreements-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .agreements-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .agreements-grid th,
+    .agreements-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+
+    private const string ValActive = "active";
+    private const string ValExpired = "expired";
+    private const string ValEndsSoon = "endsSoon";
+    private const string ValNoDates = "noDates";
+
+    private const string PermAgreementsView = "Assets.Agreements.View";
+    private const string PermAgreementsEdit = "Assets.Agreements.Edit";
+
+    private static readonly TimeSpan DataLoadTimeout = TimeSpan.FromSeconds(30);
+
+    private bool _ready;
+    private bool _isLoading = true;
+
+    private bool _canViewAgreements;
+    private bool _canEditAgreements;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private List<AgreementListRow> _allRows = new();
+    private List<AgreementListRow> _filteredRows = new();
+
+    private string _selectedType = AllValue;
+    private string _selectedSupplier = AllValue;
+    private string _selectedOwner = AllValue;
+    private string _selectedStatus = AllValue;
+    private string _selectedValidity = AllValue;
+
+    private List<string> _lookupsTypes = new();
+    private List<string> _lookupsSuppliers = new();
+    private List<string> _lookupsOwners = new();
+    private List<string> _lookupsStatuses = new();
+
+    // TZ: cache strefy i "dzisiaj" wg usera
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+    private DateTime _todayLocal = DateTime.Today;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        var isAuth = ctx != null && ctx.IsAuthenticated && ctx.IsActive == true;
+        var hasAccess = CurrentUserContextService.HasAccess;
+
+        _canViewAgreements = isAuth && hasAccess && CurrentUserContextService.Can(PermAgreementsView);
+        _canEditAgreements = _canViewAgreements && CurrentUserContextService.Can(PermAgreementsEdit);
+
+        // TZ: pobierz strefę usera i policz "dzisiaj" w tej strefie
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        _todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+        _ready = true;
+
+        if (!_canViewAgreements)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        // TZ: odśwież "dzisiaj" na reload, jak user długo trzyma stronę otwartą
+        _todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+        try
+        {
+            var loadTask = AgreementsService.GetAgreementsAsync();
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(DataLoadTimeout));
+
+            if (completedTask != loadTask)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = $"Timeout podczas ładowania danych ({(int)DataLoadTimeout.TotalSeconds}s). Sprawdź SQL i logi serwera.";
+                Snackbar.Add("Timeout podczas ładowania agreements.", Severity.Error);
+                return;
+            }
+
+            var result = await loadTask;
+
+            if (!result.Ok)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add("Nie udało się wczytać agreements.", Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new();
+
+            BuildLookupsFromRows();
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Logger.LogWarning(ex, "[AgreementsIndex] Unauthorized.");
+            Snackbar.Add("Brak uprawnień do podglądu agreements.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AgreementsIndex] Błąd ładowania agreements.");
+            Snackbar.Add("Nie udało się wczytać agreements. Spróbuj ponownie później.", Severity.Error);
+
+            _allRows = new();
+            _filteredRows = new();
+            _loadError = "Błąd podczas ładowania danych.";
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void BuildLookupsFromRows()
+    {
+        var rows = _allRows ?? new List<AgreementListRow>();
+
+        _lookupsTypes = rows.Select(x => (x.AgreementType ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsSuppliers = rows.Select(x => (x.Supplier ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsOwners = rows.Select(x => (x.Owner ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsStatuses = rows.Select(x => (x.Status ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedType != AllValue && !_lookupsTypes.Contains(_selectedType, StringComparer.OrdinalIgnoreCase))
+            _selectedType = AllValue;
+
+        if (_selectedSupplier != AllValue && !_lookupsSuppliers.Contains(_selectedSupplier, StringComparer.OrdinalIgnoreCase))
+            _selectedSupplier = AllValue;
+
+        if (_selectedOwner != AllValue && !_lookupsOwners.Contains(_selectedOwner, StringComparer.OrdinalIgnoreCase))
+            _selectedOwner = AllValue;
+
+        if (_selectedStatus != AllValue && !_lookupsStatuses.Contains(_selectedStatus, StringComparer.OrdinalIgnoreCase))
+            _selectedStatus = AllValue;
+
+        if (!IsValidityValue(_selectedValidity))
+            _selectedValidity = AllValue;
+    }
+
+    private static bool IsValidityValue(string value)
+        => value == AllValue || value == ValActive || value == ValExpired || value == ValEndsSoon || value == ValNoDates;
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+
+        _selectedType = AllValue;
+        _selectedSupplier = AllValue;
+        _selectedOwner = AllValue;
+        _selectedStatus = AllValue;
+        _selectedValidity = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnTypeChangedAsync(string value)
+    {
+        _selectedType = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSupplierChangedAsync(string value)
+    {
+        _selectedSupplier = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnOwnerChangedAsync(string value)
+    {
+        _selectedOwner = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStatusChangedAsync(string value)
+    {
+        _selectedStatus = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnValidityChangedAsync(string value)
+    {
+        _selectedValidity = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+        => _filteredRows = BuildFilteredRows();
+
+    private List<AgreementListRow> BuildFilteredRows()
+    {
+        IEnumerable<AgreementListRow> query = _allRows ?? new List<AgreementListRow>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.AgreementName, term) ||
+                ContainsIgnoreCase(x.AgreementType, term) ||
+                ContainsIgnoreCase(x.Supplier, term) ||
+                ContainsIgnoreCase(x.Owner, term) ||
+                ContainsIgnoreCase(x.ValidFrom, term) ||
+                ContainsIgnoreCase(x.ValidTo, term) ||
+                ContainsIgnoreCase(x.Status, term)
+            );
+        }
+
+        if (_selectedType != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.AgreementType, _selectedType));
+
+        if (_selectedSupplier != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Supplier, _selectedSupplier));
+
+        if (_selectedOwner != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Owner, _selectedOwner));
+
+        if (_selectedStatus != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Status, _selectedStatus));
+
+        if (_selectedValidity != AllValue)
+            query = query.Where(x => MatchesValidity(x, _selectedValidity, _todayLocal));
+
+        return query.ToList();
+    }
+
+    private static bool MatchesValidity(AgreementListRow row, string mode, DateTime todayLocal)
+    {
+        var to = ParseDateSafe(row.ValidTo);
+        var from = ParseDateSafe(row.ValidFrom);
+
+        var hasAnyDate = (from.HasValue || to.HasValue);
+
+        if (mode == ValNoDates)
+            return !hasAnyDate;
+
+        if (!to.HasValue)
+            return false;
+
+        if (mode == ValExpired)
+            return to.Value.Date < todayLocal;
+
+        if (mode == ValActive)
+            return to.Value.Date >= todayLocal;
+
+        if (mode == ValEndsSoon)
+        {
+            var days = (to.Value.Date - todayLocal).TotalDays;
+            return days >= 0 && days <= 30;
+        }
+
+        return true;
+    }
+
+    private static DateTime? ParseDateSafe(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var s = text.Trim();
+
+        if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var dt))
+            return dt;
+
+        if (DateTime.TryParse(s, out dt))
+            return dt;
+
+        return null;
+    }
+
+    private static string FormatDateSafe(string? text)
+    {
+        var dt = ParseDateSafe(text);
+        return dt.HasValue ? dt.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : string.Empty;
+    }
+
+    private static bool EqualsIgnoreCaseTrim(string? a, string b)
+        => string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetRowClass(AgreementListRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditAgreements ? "agreement-row agreement-row-clickable" : "agreement-row";
+    }
+
+    private Task OnRowClickAsync(DataGridRowClickEventArgs<AgreementListRow> args)
+    {
+        if (_isLoading)
+            return Task.CompletedTask;
+
+        if (args?.Item == null)
+            return Task.CompletedTask;
+
+        if (!_canEditAgreements)
+        {
+            Snackbar.Add("Brak uprawnień do edycji agreements.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        var a = args.Item;
+
+        var name = Uri.EscapeDataString((a.AgreementName ?? string.Empty).Trim());
+        var supplier = Uri.EscapeDataString((a.Supplier ?? string.Empty).Trim());
+        var type = Uri.EscapeDataString((a.AgreementType ?? string.Empty).Trim());
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Snackbar.Add("Nie można otworzyć szczegółów, brak nazwy agreement.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigationManager.NavigateTo($"/assets/agreements/edit?name={name}&supplier={supplier}&type={type}");
+        return Task.CompletedTask;
+    }
+}

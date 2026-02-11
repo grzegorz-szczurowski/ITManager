@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="EditActionDialogTitle" xml:space="preserve">
+    <value>Action</value>
+  </data>
+
+	<data name="NoPermissionEditActions" xml:space="preserve">
+    <value>You do not have permission to edit actions.</value>
+  </data>
+
+	<data name="Subtitle" xml:space="preserve">
+    <value>Add an action or comment to your request.</value>
+  </data>
+
+	<data name="ActionTextLabel" xml:space="preserve">
+    <value>Action description</value>
+  </data>
+
+	<data name="ActionTextRequired" xml:space="preserve">
+    <value>Description is required (minimum 3 characters).</value>
+  </data>
+
+	<data name="IsPublicLabel" xml:space="preserve">
+    <value>Public</value>
+  </data>
+
+	<data name="PrivateNotAllowedInfo" xml:space="preserve">
+    <value>You are not allowed to add private notes. The entry will be saved as public.</value>
+  </data>
+
+	<data name="TargetStatusLabel" xml:space="preserve">
+    <value>Target status</value>
+  </data>
+
+	<data name="TargetStatusHelp" xml:space="preserve">
+    <value>Select the status to set after saving. Clear to keep the current status.</value>
+  </data>
+
+	<data name="WaitingReasonLabel" xml:space="preserve">
+    <value>Waiting reason</value>
+  </data>
+
+	<data name="WaitingReasonRequired" xml:space="preserve">
+    <value>Please select a waiting reason.</value>
+  </data>
+
+	<data name="SaveButton" xml:space="preserve">
+    <value>Save</value>
+  </data>
+
+	<data name="CancelButton" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+
+	<data name="FormInvalidWarning" xml:space="preserve">
+    <value>Please fill in the required fields.</value>
+  </data>
+
+	<data name="SaveError" xml:space="preserve">
+    <value>Save failed: {0}</value>
+  </data>
+
+	<data name="WaitingReason.USER" xml:space="preserve">
+    <value>Waiting for user</value>
+  </data>
+
+	<data name="WaitingReason.3RD" xml:space="preserve">
+    <value>Waiting for vendor</value>
+  </data>
+
+	<data name="WaitingReason.HOLD" xml:space="preserve">
+    <value>On hold</value>
+  </data>
+
+	<data name="WaitingReason.OTHER" xml:space="preserve">
+    <value>Other</value>
+  </data>
+</root>

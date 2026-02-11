@@ -1,0 +1,60 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve"><value>Mój sprzęt IT</value></data>
+	<data name="Subtitle" xml:space="preserve"><value>Zasoby przypisane do Twojego konta.</value></data>
+	<data name="Refresh" xml:space="preserve"><value>Odśwież</value></data>
+	<data name="Loading" xml:space="preserve"><value>Ładowanie danych...</value></data>
+
+	<data name="InconsistenciesInfo" xml:space="preserve">
+    <value>W przypadku zauważenia nieścisłości na liście zasobów (np. brakujący sprzęt, błędne dane lub niewłaściwe przypisanie), prosimy o kontakt z działem IT w celu wyjaśnienia.</value>
+  </data>
+
+	<data name="DevicesSectionTitle" xml:space="preserve"><value>Urządzenia</value></data>
+	<data name="LicensesSectionTitle" xml:space="preserve"><value>Licencje</value></data>
+	<data name="SimSectionTitle" xml:space="preserve"><value>Karty SIM</value></data>
+
+	<data name="NoDevices" xml:space="preserve"><value>Brak przypisanych urządzeń.</value></data>
+	<data name="NoLicenses" xml:space="preserve"><value>Brak przypisanych licencji.</value></data>
+	<data name="NoSimCards" xml:space="preserve"><value>Brak przypisanych kart SIM.</value></data>
+
+	<data name="ReadOnlyHint" xml:space="preserve"><value>Podgląd tylko do odczytu.</value></data>
+
+	<data name="ColKind" xml:space="preserve"><value>Rodzaj</value></data>
+	<data name="ColHostname" xml:space="preserve"><value>Nazwa hosta</value></data>
+	<data name="ColModel" xml:space="preserve"><value>Model</value></data>
+	<data name="ColSerialNumber" xml:space="preserve"><value>Numer seryjny</value></data>
+	<data name="ColAssetNo" xml:space="preserve"><value>Nr inwentarzowy</value></data>
+	<data name="ColStatus" xml:space="preserve"><value>Status</value></data>
+
+	<data name="ColName" xml:space="preserve"><value>Nazwa</value></data>
+	<data name="ColType" xml:space="preserve"><value>Typ</value></data>
+	<data name="ColInventoryNo" xml:space="preserve"><value>Nr inwentarzowy</value></data>
+	<data name="ColSubscriptionEnds" xml:space="preserve"><value>Koniec subskrypcji</value></data>
+	<data name="ColNote" xml:space="preserve"><value>Notatka</value></data>
+
+	<data name="ColMobileNumber" xml:space="preserve"><value>Numer telefonu</value></data>
+	<data name="ColSimCardNumber" xml:space="preserve"><value>Numer karty SIM</value></data>
+	<data name="ColOperator" xml:space="preserve"><value>Operator</value></data>
+	<data name="ColPlan" xml:space="preserve"><value>Taryfa</value></data>
+
+	<data name="InitUserError" xml:space="preserve"><value>Błąd inicjalizacji użytkownika: {0}</value></data>
+	<data name="OnlyForAuthenticated" xml:space="preserve"><value>Ta sekcja jest dostępna tylko dla zalogowanych użytkowników z dostępem aplikacyjnym.</value></data>
+	<data name="MissingUserId" xml:space="preserve"><value>Nie udało się ustalić UserId użytkownika w bazie ITManager (dbo.users).</value></data>
+
+	<data name="DevicesReadError" xml:space="preserve"><value>Błąd odczytu urządzeń: {0}</value></data>
+	<data name="LicensesReadError" xml:space="preserve"><value>Błąd odczytu licencji: {0}</value></data>
+	<data name="SimReadError" xml:space="preserve"><value>Błąd odczytu kart SIM: {0}</value></data>
+</root>

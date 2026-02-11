@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Ustawienia</value>
+  </data>
+	<data name="Subtitle" xml:space="preserve">
+    <value>Zarządzaj preferencjami i konfiguracją systemu.</value>
+  </data>
+	<data name="NoPermission" xml:space="preserve">
+    <value>Brak uprawnień do zarządzania ustawieniami.</value>
+  </data>
+	<data name="Save" xml:space="preserve">
+    <value>Zapisz</value>
+  </data>
+	<data name="Saved" xml:space="preserve">
+    <value>Zapisano.</value>
+  </data>
+	<data name="SaveError" xml:space="preserve">
+    <value>Błąd zapisu</value>
+  </data>
+
+	<data name="Section_TimeZone" xml:space="preserve">
+    <value>Strefa czasowa</value>
+  </data>
+
+	<data name="TimeZone_Title" xml:space="preserve">
+    <value>Strefa czasowa</value>
+  </data>
+	<data name="TimeZone_Desc" xml:space="preserve">
+    <value>Wybierz preferowaną strefę czasową. Będzie używana do wyświetlania dat i godzin w całym systemie.</value>
+  </data>
+	<data name="TimeZone_SelectLabel" xml:space="preserve">
+    <value>Strefa czasowa</value>
+  </data>
+
+	<data name="SelectSectionHint" xml:space="preserve">
+    <value>Wybierz sekcję po lewej stronie, aby zobaczyć jej ustawienia.</value>
+  </data>
+</root>

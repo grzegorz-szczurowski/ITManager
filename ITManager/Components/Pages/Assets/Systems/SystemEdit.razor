@@ -1,0 +1,1639 @@
+﻿@page "/assets/systems/edit/{SystemId:int}"
+@page "/assets/systems/create"
+@namespace ITManager.Components.Pages.Assets.Systems
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Systems.View")]
+
+@* File: Components/Pages/Assets/Systems/SystemEdit.razor
+   Description: Ekran edycji systemu jako page (bez modala). UX/UI spójny z UserEdit:
+                - Stały układ: summary header + tabs ze scrollem
+                - Start read-only, Enable edit odblokowuje edycję
+                - Lookupi jako MudAutocomplete z filtrowaniem po wpisywanym tekście
+                - UI blokowane tylko podczas zapisu
+                - Dirty tracking (snapshot JSON) + potwierdzenie wyjścia przy niezapisanych zmianach
+   Version: 1.01
+   Updated: 2026-02-08
+   Change log:
+     - 1.01 (2026-02-08) UI: usunięty przycisk Back z topbara i stary dolny zestaw akcji.
+                              Cancel changes przeniesiony na górę (tylko akcja w edycji),
+                              a sticky footer: Enable edit (lewo), Save + Close (prawo).
+   Notes:
+     - Routing:
+         /assets/systems/edit/{SystemId}  (edycja istniejącego)
+         /assets/systems/create           (nowy)
+     - Uprawnienia:
+         View: Assets.Systems.View (page-level policy)
+         Edit: Assets.Systems.Edit (Enable edit + zapis)
+     - returnUrl:
+         query string ?returnUrl=... (powrót po Close / po zapisie)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Data
+@using System.Data.SqlClient
+@using System.Linq
+@using System.Text.Json
+@using System.Threading
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Configuration
+@using MudBlazor
+@using ITManager.Services.Auth
+
+@inject IConfiguration Configuration
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+
+<MudPaper Elevation="0" Class="system-edit-root pa-4">
+
+    <MudStack Spacing="2">
+
+        @if (!string.IsNullOrWhiteSpace(_loadError))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-2">
+                @_loadError
+            </MudAlert>
+        }
+
+        @if (_isLoading)
+        {
+            <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="system-edit-loading">
+                <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                <MudText Typo="Typo.subtitle1" Class="mt-2">Ładowanie danych...</MudText>
+            </MudStack>
+        }
+        else if (!_canViewSystems)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true">
+                Brak uprawnień do podglądu systemu.
+            </MudAlert>
+        }
+        else
+        {
+            <div class="system-edit-content">
+
+                <MudPaper Elevation="0" Class="system-summary">
+                    <MudStack Spacing="1">
+
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="system-summary-top">
+                            <MudText Typo="Typo.h6" Class="system-summary-title">
+                                @GetSafe(_model.SystemName, _isCreateMode ? "New system" : "System")
+                            </MudText>
+
+                            @if (_isCreateMode)
+                            {
+                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" Class="ml-2">
+                                    New
+                                </MudChip>
+                            }
+
+                            @if (!_canEditSystems)
+                            {
+                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" Class="ml-2">
+                                    Read-only
+                                </MudChip>
+                            }
+
+                            @if (_isEditEnabled && _canEditSystems && _isDirty)
+                            {
+                                <MudChip T="string" Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Class="ml-2">
+                                    Unsaved
+                                </MudChip>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(LookupName(_lookupCriticalities, _model.SystemCriticalityId)))
+                            {
+                                <MudChip T="string" Variant="Variant.Filled" Color="Color.Primary" Class="ml-2">
+                                    @LookupName(_lookupCriticalities, _model.SystemCriticalityId)
+                                </MudChip>
+                            }
+
+                            <MudSpacer />
+                        </MudStack>
+
+                        <MudText Typo="Typo.body2" Class="system-summary-sub">
+                            @GetSummaryLine()
+                        </MudText>
+
+                        <MudGrid Spacing="1" AlignItems="AlignItems.Center" Class="system-summary-grid">
+
+                            <MudItem xs="12" sm="6" md="6" Class="system-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="system-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Dns" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>Server:</b> <span class="system-mono">@GetSafe(_model.ServerName, "-")</span>
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="system-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="system-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>DB:</b> <span class="system-mono">@GetSafe(_model.DbName, "-")</span>
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="system-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="system-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Category" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>Type:</b> @GetSafe(LookupName(_lookupTypes, _model.SystemTypeId), "-")
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="system-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="system-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Public" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>Scope:</b> @GetSafe(LookupName(_lookupScopes, _model.SystemScopeId), "-")
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                        </MudGrid>
+
+                    </MudStack>
+                </MudPaper>
+
+                <MudPaper Elevation="0" Class="system-tabs">
+                    <MudTabs Rounded="true" Elevation="0" KeepPanelsAlive="true">
+
+                        <MudTabPanel Text="General">
+                            <div class="system-tab-scroll">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="System name"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Required="true"
+                                                      RequiredError="Nazwa systemu jest wymagana"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.SystemName"
+                                                      ValueChanged="@(v => OnSystemNameChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="Short description"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.ShortDescription"
+                                                      ValueChanged="@(v => OnShortDescriptionChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="Server name"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.ServerName"
+                                                      ValueChanged="@(v => OnServerNameChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="DB name"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.DbName"
+                                                      ValueChanged="@(v => OnDbNameChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                </MudGrid>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Classification">
+                            <div class="system-tab-scroll">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="LookupItemMini"
+                                                             Label="Type"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedType"
+                                                             ValueChanged="OnSelectedTypeChangedAsync"
+                                                             SearchFunc="SearchTypesAsync"
+                                                             ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Type"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(LookupName(_lookupTypes, _model.SystemTypeId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="LookupItemMini"
+                                                             Label="Scope"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedScope"
+                                                             ValueChanged="OnSelectedScopeChangedAsync"
+                                                             SearchFunc="SearchScopesAsync"
+                                                             ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Scope"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(LookupName(_lookupScopes, _model.SystemScopeId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="LookupItemMini"
+                                                             Label="Criticality"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedCriticality"
+                                                             ValueChanged="OnSelectedCriticalityChangedAsync"
+                                                             SearchFunc="SearchCriticalitiesAsync"
+                                                             ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Criticality"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(LookupName(_lookupCriticalities, _model.SystemCriticalityId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="LookupItemMini"
+                                                             Label="Hosting type"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedHostingType"
+                                                             ValueChanged="OnSelectedHostingTypeChangedAsync"
+                                                             SearchFunc="SearchHostingTypesAsync"
+                                                             ToStringFunc="@(x => x?.Name ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Hosting type"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(LookupName(_lookupHostingTypes, _model.SystemHostingTypeId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                </MudGrid>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Owners and admins">
+                            <div class="system-tab-scroll">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="UserLookupMini"
+                                                             Label="System owner"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedSystemOwner"
+                                                             ValueChanged="OnSelectedSystemOwnerChangedAsync"
+                                                             SearchFunc="SearchUsersAsync"
+                                                             ToStringFunc="@(x => x?.Display ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="System owner"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(UserName(_model.SystemOwnerId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="UserLookupMini"
+                                                             Label="Data owner"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedDataOwner"
+                                                             ValueChanged="OnSelectedDataOwnerChangedAsync"
+                                                             SearchFunc="SearchUsersAsync"
+                                                             ToStringFunc="@(x => x?.Display ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Data owner"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(UserName(_model.DataOwnerId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="UserLookupMini"
+                                                             Label="Primary administrator"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedPrimaryAdmin"
+                                                             ValueChanged="OnSelectedPrimaryAdminChangedAsync"
+                                                             SearchFunc="SearchUsersAsync"
+                                                             ToStringFunc="@(x => x?.Display ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Primary administrator"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(UserName(_model.PrimaryAdministratorId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudAutocomplete T="UserLookupMini"
+                                                             Label="Secondary administrator"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             Clearable="true"
+                                                             CoerceText="true"
+                                                             ResetValueOnEmptyText="true"
+                                                             Disabled="@_isUiLocked"
+                                                             Value="@_selectedSecondaryAdmin"
+                                                             ValueChanged="OnSelectedSecondaryAdminChangedAsync"
+                                                             SearchFunc="SearchUsersAsync"
+                                                             ToStringFunc="@(x => x?.Display ?? string.Empty)"
+                                                             DebounceInterval="150"
+                                                             MaxItems="1000" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Secondary administrator"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@GetSafe(UserName(_model.SecondaryAdministratorId), "-")"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                </MudGrid>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Backup">
+                            <div class="system-tab-scroll">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="Last backup status"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.LastBackupStatus"
+                                                      ValueChanged="@(v => OnLastBackupStatusChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="Backup frequency"
+                                                      HelperText="np. daily, weekly, monthly"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Disabled="@_isUiLocked"
+                                                      ReadOnly="@IsReadOnly"
+                                                      Value="@_model.BackupFrequently"
+                                                      ValueChanged="@(v => OnBackupFrequentlyChanged(v))"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        @if (!IsReadOnly)
+                                        {
+                                            <MudDatePicker Label="Last backup date"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Editable="true"
+                                                           Clearable="true"
+                                                           Disabled="@_isUiLocked"
+                                                           Date="@_model.LastBackupDate"
+                                                           DateChanged="@(d => OnLastBackupDateChanged(d))" />
+                                        }
+                                        else
+                                        {
+                                            <MudTextField T="string"
+                                                          Label="Last backup date"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          ReadOnly="true"
+                                                          Value="@FormatDate(_model.LastBackupDate)"
+                                                          Adornment="@LockAdornment"
+                                                          AdornmentIcon="@LockIcon"
+                                                          AdornmentColor="Color.Default" />
+                                        }
+                                    </MudItem>
+
+                                </MudGrid>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="Notes">
+                            <div class="system-tab-scroll">
+                                <MudTextField T="string"
+                                              Label=" "
+                                              Lines="12"
+                                              AutoGrow="true"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              Disabled="@_isUiLocked"
+                                              ReadOnly="@IsReadOnly"
+                                              Value="@_model.Notes"
+                                              ValueChanged="@(v => OnNotesChanged(v))"
+                                              Adornment="@LockAdornment"
+                                              AdornmentIcon="@LockIcon"
+                                              AdornmentColor="Color.Default" />
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="RBAC">
+                            <div class="system-tab-scroll">
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                    Assets.Systems.View: @(_canViewSystems ? "Yes" : "No")<br />
+                                    Assets.Systems.Edit: @(_canEditSystems ? "Yes" : "No")
+                                </MudAlert>
+                            </div>
+                        </MudTabPanel>
+
+                    </MudTabs>
+                </MudPaper>
+
+            </div>
+
+            <MudPaper Elevation="0" Class="system-footer">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="system-footer-inner">
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="@(_isEditEnabled ? Color.Default : Color.Primary)"
+                               StartIcon="@(_isEditEnabled ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                               OnClick="ToggleEditMode"
+                               Disabled="@(!_canEditSystems || _isSaving || _isLoading)">
+                        @(_isEditEnabled ? "Lock" : "Enable edit")
+                    </MudButton>
+
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SaveAsync"
+                                   Disabled="@(!_isEditEnabled || !_canEditSystems || _isSaving || _isLoading || !_isLoaded || !_isDirty)">
+                            Save
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Close"
+                                   OnClick="CloseAsync"
+                                   Disabled="@_isSaving">
+                            Close
+                        </MudButton>
+                    </MudStack>
+
+                </MudStack>
+            </MudPaper>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .system-edit-root {
+        width: 100%;
+        box-sizing: border-box;
+        position: relative;
+        padding-bottom: 78px;
+    }
+
+    .system-edit-content {
+        width: 100%;
+        height: 720px;
+        max-height: 720px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+    }
+
+    .system-edit-loading {
+        height: 720px;
+    }
+
+    .system-summary {
+        padding: 14px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        margin-bottom: 12px;
+        background: rgba(255,255,255,0.02);
+        flex: 0 0 auto;
+        box-sizing: border-box;
+    }
+
+    .system-summary-top {
+        min-width: 0;
+    }
+
+    .system-summary-title {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .system-summary-sub {
+        opacity: 0.85;
+        margin-top: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .system-summary-grid {
+        margin-top: 6px;
+    }
+
+    .system-summary-cell {
+        display: flex;
+        min-width: 0;
+    }
+
+    .system-summary-item {
+        width: 100%;
+        min-height: 30px;
+        line-height: 1.2;
+        min-width: 0;
+    }
+
+    .system-tabs {
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        flex: 1 1 auto;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+    }
+
+    .system-tab-scroll {
+        height: 100%;
+        overflow: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .system-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .system-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: var(--mud-palette-surface);
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        box-sizing: border-box;
+    }
+
+    .system-footer-inner {
+        min-width: 0;
+    }
+</style>
+
+@code
+{
+    [Parameter] public int SystemId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private const string ConnectionStringName = "ITManagerConnection";
+
+    private bool _isLoading = true;
+    private bool _isLoaded;
+    private bool _isSaving;
+
+    private bool _canViewSystems;
+    private bool _canEditSystems;
+
+    private bool _isEditEnabled;
+    private bool _isDirty;
+    private string _originalJson = string.Empty;
+
+    private string _loadError = string.Empty;
+
+    private SystemEditModel _model = new();
+
+    private List<LookupItemMini> _lookupTypes = new();
+    private List<LookupItemMini> _lookupScopes = new();
+    private List<LookupItemMini> _lookupCriticalities = new();
+    private List<LookupItemMini> _lookupHostingTypes = new();
+    private List<UserLookupMini> _lookupUsers = new();
+
+    private LookupItemMini? _selectedType;
+    private LookupItemMini? _selectedScope;
+    private LookupItemMini? _selectedCriticality;
+    private LookupItemMini? _selectedHostingType;
+
+    private UserLookupMini? _selectedSystemOwner;
+    private UserLookupMini? _selectedDataOwner;
+    private UserLookupMini? _selectedPrimaryAdmin;
+    private UserLookupMini? _selectedSecondaryAdmin;
+
+    private bool _isCreateMode => IsCreateRoute() || SystemId <= 0;
+    private bool _isUiLocked => _isSaving;
+
+    private bool IsReadOnly => !_isEditEnabled || !_canEditSystems;
+
+    private Adornment LockAdornment => IsReadOnly ? Adornment.End : Adornment.None;
+    private string? LockIcon => IsReadOnly ? Icons.Material.Filled.Lock : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            if (ctx == null || !ctx.IsAuthenticated || ctx.IsActive != true || !ctx.Has("Assets.Systems.View"))
+            {
+                _canViewSystems = false;
+                _canEditSystems = false;
+                return;
+            }
+
+            _canViewSystems = true;
+            _canEditSystems = ctx.Has("Assets.Systems.Edit");
+
+            await LoadAsync();
+
+            _isEditEnabled = _isCreateMode && _canEditSystems;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private string BuildPageTitle()
+        => _isCreateMode ? "System: New" : "System: Edit";
+
+    private bool IsCreateRoute()
+    {
+        var uri = Nav.Uri ?? string.Empty;
+        return uri.Contains("/assets/systems/create", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ToggleEditMode()
+    {
+        if (_isSaving || _isLoading || !_canEditSystems)
+            return;
+
+        _isEditEnabled = !_isEditEnabled;
+
+        if (!_isEditEnabled)
+            RevertChanges();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _isLoaded = false;
+        _loadError = string.Empty;
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var cs = Configuration.GetConnectionString(ConnectionStringName);
+            if (string.IsNullOrWhiteSpace(cs))
+            {
+                _loadError = $"Brak ConnectionString '{ConnectionStringName}'.";
+                return;
+            }
+
+            using var con = new SqlConnection(cs);
+            await con.OpenAsync();
+
+            await LoadLookupsAsync(con);
+
+            if (_isCreateMode)
+            {
+                _model = new SystemEditModel { Id = 0 };
+                _isLoaded = true;
+                SyncSelectedFromModel();
+                SnapshotOriginal();
+                return;
+            }
+
+            if (SystemId <= 0)
+            {
+                _loadError = "Nieprawidłowe ID systemu.";
+                return;
+            }
+
+            await LoadSystemAsync(con, SystemId);
+
+            if (string.IsNullOrWhiteSpace(_loadError))
+            {
+                _isLoaded = true;
+                SyncSelectedFromModel();
+                SnapshotOriginal();
+                _isEditEnabled = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SystemEdit] ERROR: {ex}");
+            _loadError = "Błąd podczas ładowania danych systemu.";
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void SnapshotOriginal()
+    {
+        _originalJson = JsonSerializer.Serialize(_model ?? new SystemEditModel());
+        _isDirty = false;
+    }
+
+    private void MarkDirty()
+    {
+        if (string.IsNullOrWhiteSpace(_originalJson))
+        {
+            _isDirty = true;
+            return;
+        }
+
+        var current = JsonSerializer.Serialize(_model ?? new SystemEditModel());
+        _isDirty = !string.Equals(_originalJson, current, StringComparison.Ordinal);
+    }
+
+    private void RevertChanges()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_originalJson))
+                return;
+
+            var restored = JsonSerializer.Deserialize<SystemEditModel>(_originalJson);
+            if (restored == null)
+                return;
+
+            _model = restored;
+            _isDirty = false;
+
+            SyncSelectedFromModel();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SystemEdit] RevertChanges ERROR: {ex}");
+            Snackbar.Add("Nie udało się przywrócić zmian.", Severity.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_canEditSystems || !_isEditEnabled || _isSaving || _isLoading || !_isLoaded || !_isDirty)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_model.SystemName))
+        {
+            Snackbar.Add("Uzupełnij nazwę systemu.", Severity.Warning);
+            return;
+        }
+
+        _isSaving = true;
+
+        try
+        {
+            var cs = Configuration.GetConnectionString(ConnectionStringName);
+            if (string.IsNullOrWhiteSpace(cs))
+            {
+                Snackbar.Add($"Brak ConnectionString '{ConnectionStringName}'.", Severity.Error);
+                return;
+            }
+
+            using var con = new SqlConnection(cs);
+            await con.OpenAsync();
+
+            if (_isCreateMode || _model.Id <= 0)
+            {
+                var newId = await InsertSystemAsync(con, _model);
+                if (newId <= 0)
+                {
+                    Snackbar.Add("Nie udało się dodać systemu.", Severity.Error);
+                    return;
+                }
+
+                _model.Id = newId;
+                Snackbar.Add("Dodano system.", Severity.Success);
+                SnapshotOriginal();
+                NavigateBack(force: true);
+                return;
+            }
+
+            var affected = await UpdateSystemAsync(con, _model);
+            if (affected <= 0)
+            {
+                Snackbar.Add("Nie zapisano zmian (brak zaktualizowanych rekordów).", Severity.Warning);
+                return;
+            }
+
+            Snackbar.Add("Zapisano zmiany.", Severity.Success);
+            SnapshotOriginal();
+            NavigateBack(force: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SystemEdit] SAVE ERROR: {ex}");
+            Snackbar.Add("Błąd zapisu danych systemu.", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_isSaving)
+            return;
+
+        if (_canEditSystems && _isEditEnabled && _isDirty)
+        {
+            var discard = await DialogService.ShowMessageBox(
+                title: "Niezapisane zmiany",
+                message: "Masz niezapisane zmiany. Zamknąć ekran i odrzucić zmiany?",
+                yesText: "Odrzuć i zamknij",
+                cancelText: "Zostań"
+            );
+
+            if (discard != true)
+                return;
+        }
+
+        NavigateBack(force: true);
+    }
+
+    private void NavigateBack(bool force)
+    {
+        var url = (ReturnUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(url))
+            url = "/assets/systems";
+
+        Nav.NavigateTo(url, forceLoad: false, replace: force);
+    }
+
+    private async Task LoadSystemAsync(SqlConnection con, int id)
+    {
+        var sql = @"
+SELECT
+    s.id,
+    s.name,
+    s.db_name,
+    s.server_name,
+    s.short_description,
+
+    s.system_type_id,
+    s.system_scope_id,
+    s.system_criticality_id,
+    s.system_hosting_type_id,
+
+    s.system_owner_id,
+    s.data_owner_id,
+    s.primary_administrator_id,
+    s.secondary_administrator_id,
+
+    s.last_backup_status,
+    s.last_backup_date,
+    s.backup_frequently,
+    s.notes
+FROM dbo.systems s
+WHERE s.id = @id;";
+
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.Int) { Value = id });
+
+        using var r = await cmd.ExecuteReaderAsync();
+        if (!await r.ReadAsync())
+        {
+            _loadError = "Nie znaleziono systemu o podanym ID.";
+            return;
+        }
+
+        _model = new SystemEditModel
+        {
+            Id = SafeInt(r, "id"),
+            SystemName = SafeString(r, "name"),
+            DbName = SafeString(r, "db_name"),
+            ServerName = SafeString(r, "server_name"),
+            ShortDescription = SafeString(r, "short_description"),
+
+            SystemTypeId = SafeNullableInt(r, "system_type_id"),
+            SystemScopeId = SafeNullableInt(r, "system_scope_id"),
+            SystemCriticalityId = SafeNullableInt(r, "system_criticality_id"),
+            SystemHostingTypeId = SafeNullableInt(r, "system_hosting_type_id"),
+
+            SystemOwnerId = SafeNullableInt(r, "system_owner_id"),
+            DataOwnerId = SafeNullableInt(r, "data_owner_id"),
+            PrimaryAdministratorId = SafeNullableInt(r, "primary_administrator_id"),
+            SecondaryAdministratorId = SafeNullableInt(r, "secondary_administrator_id"),
+
+            LastBackupStatus = SafeString(r, "last_backup_status"),
+            LastBackupDate = SafeNullableDateTime(r, "last_backup_date"),
+            BackupFrequently = SafeString(r, "backup_frequently"),
+
+            Notes = SafeString(r, "notes"),
+        };
+    }
+
+    private async Task LoadLookupsAsync(SqlConnection con)
+    {
+        _lookupTypes = await LoadSimpleLookupAsync(con, "dbo.system_type");
+        _lookupScopes = await LoadSimpleLookupAsync(con, "dbo.system_scope");
+        _lookupCriticalities = await LoadSimpleLookupAsync(con, "dbo.system_criticality");
+        _lookupHostingTypes = await LoadSimpleLookupAsync(con, "dbo.system_hosting_type");
+        _lookupUsers = await LoadUsersLookupAsync(con);
+    }
+
+    private void SyncSelectedFromModel()
+    {
+        _selectedType = FindLookup(_lookupTypes, _model.SystemTypeId);
+        _selectedScope = FindLookup(_lookupScopes, _model.SystemScopeId);
+        _selectedCriticality = FindLookup(_lookupCriticalities, _model.SystemCriticalityId);
+        _selectedHostingType = FindLookup(_lookupHostingTypes, _model.SystemHostingTypeId);
+
+        _selectedSystemOwner = FindUser(_lookupUsers, _model.SystemOwnerId);
+        _selectedDataOwner = FindUser(_lookupUsers, _model.DataOwnerId);
+        _selectedPrimaryAdmin = FindUser(_lookupUsers, _model.PrimaryAdministratorId);
+        _selectedSecondaryAdmin = FindUser(_lookupUsers, _model.SecondaryAdministratorId);
+    }
+
+    private static LookupItemMini? FindLookup(List<LookupItemMini> list, int? id)
+        => (id.HasValue && id.Value > 0) ? list.FirstOrDefault(x => x.Id == id.Value) : null;
+
+    private static UserLookupMini? FindUser(List<UserLookupMini> list, int? id)
+        => (id.HasValue && id.Value > 0) ? list.FirstOrDefault(x => x.Id == id.Value) : null;
+
+    private Task OnSelectedTypeChangedAsync(LookupItemMini? item)
+    {
+        _selectedType = item;
+        _model.SystemTypeId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedScopeChangedAsync(LookupItemMini? item)
+    {
+        _selectedScope = item;
+        _model.SystemScopeId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedCriticalityChangedAsync(LookupItemMini? item)
+    {
+        _selectedCriticality = item;
+        _model.SystemCriticalityId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedHostingTypeChangedAsync(LookupItemMini? item)
+    {
+        _selectedHostingType = item;
+        _model.SystemHostingTypeId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedSystemOwnerChangedAsync(UserLookupMini? item)
+    {
+        _selectedSystemOwner = item;
+        _model.SystemOwnerId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedDataOwnerChangedAsync(UserLookupMini? item)
+    {
+        _selectedDataOwner = item;
+        _model.DataOwnerId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedPrimaryAdminChangedAsync(UserLookupMini? item)
+    {
+        _selectedPrimaryAdmin = item;
+        _model.PrimaryAdministratorId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedSecondaryAdminChangedAsync(UserLookupMini? item)
+    {
+        _selectedSecondaryAdmin = item;
+        _model.SecondaryAdministratorId = item?.Id;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private Task<IEnumerable<LookupItemMini>> SearchTypesAsync(string value, CancellationToken token)
+        => Task.FromResult(FilterLookup(_lookupTypes, value));
+
+    private Task<IEnumerable<LookupItemMini>> SearchScopesAsync(string value, CancellationToken token)
+        => Task.FromResult(FilterLookup(_lookupScopes, value));
+
+    private Task<IEnumerable<LookupItemMini>> SearchCriticalitiesAsync(string value, CancellationToken token)
+        => Task.FromResult(FilterLookup(_lookupCriticalities, value));
+
+    private Task<IEnumerable<LookupItemMini>> SearchHostingTypesAsync(string value, CancellationToken token)
+        => Task.FromResult(FilterLookup(_lookupHostingTypes, value));
+
+    private Task<IEnumerable<UserLookupMini>> SearchUsersAsync(string value, CancellationToken token)
+        => Task.FromResult(FilterUsers(_lookupUsers, value));
+
+    private static IEnumerable<LookupItemMini> FilterLookup(List<LookupItemMini> src, string value)
+    {
+        if (src == null || src.Count == 0)
+            return Array.Empty<LookupItemMini>();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return src;
+
+        var term = value.Trim();
+        return src.Where(x => (x.Name ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<UserLookupMini> FilterUsers(List<UserLookupMini> src, string value)
+    {
+        if (src == null || src.Count == 0)
+            return Array.Empty<UserLookupMini>();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return src;
+
+        var term = value.Trim();
+        return src.Where(x => (x.Display ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task<int> InsertSystemAsync(SqlConnection con, SystemEditModel m)
+    {
+        var sql = @"
+INSERT INTO dbo.systems
+(
+    name,
+    db_name,
+    server_name,
+    short_description,
+
+    system_type_id,
+    system_scope_id,
+    system_criticality_id,
+    system_hosting_type_id,
+
+    system_owner_id,
+    data_owner_id,
+    primary_administrator_id,
+    secondary_administrator_id,
+
+    last_backup_status,
+    last_backup_date,
+    backup_frequently,
+
+    notes
+)
+OUTPUT INSERTED.id
+VALUES
+(
+    @name,
+    @db_name,
+    @server_name,
+    @short_description,
+
+    @system_type_id,
+    @system_scope_id,
+    @system_criticality_id,
+    @system_hosting_type_id,
+
+    @system_owner_id,
+    @data_owner_id,
+    @primary_administrator_id,
+    @secondary_administrator_id,
+
+    @last_backup_status,
+    @last_backup_date,
+    @backup_frequently,
+
+    @notes
+);";
+
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        AddSystemParams(cmd, m, includeId: false);
+
+        var obj = await cmd.ExecuteScalarAsync();
+        if (obj == null || obj == DBNull.Value)
+            return 0;
+
+        return Convert.ToInt32(obj);
+    }
+
+    private static async Task<int> UpdateSystemAsync(SqlConnection con, SystemEditModel m)
+    {
+        var sql = @"
+UPDATE dbo.systems
+SET
+    name = @name,
+    db_name = @db_name,
+    server_name = @server_name,
+    short_description = @short_description,
+
+    system_type_id = @system_type_id,
+    system_scope_id = @system_scope_id,
+    system_criticality_id = @system_criticality_id,
+    system_hosting_type_id = @system_hosting_type_id,
+
+    system_owner_id = @system_owner_id,
+    data_owner_id = @data_owner_id,
+    primary_administrator_id = @primary_administrator_id,
+    secondary_administrator_id = @secondary_administrator_id,
+
+    last_backup_status = @last_backup_status,
+    last_backup_date = @last_backup_date,
+    backup_frequently = @backup_frequently,
+
+    notes = @notes
+WHERE id = @id;";
+
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        AddSystemParams(cmd, m, includeId: true);
+
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static void AddSystemParams(SqlCommand cmd, SystemEditModel m, bool includeId)
+    {
+        if (includeId)
+            cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.Int) { Value = m.Id });
+
+        cmd.Parameters.Add(new SqlParameter("@name", SqlDbType.NVarChar, 200) { Value = ToDbNullable(m.SystemName) });
+        cmd.Parameters.Add(new SqlParameter("@db_name", SqlDbType.NVarChar, 200) { Value = ToDbNullable(m.DbName) });
+        cmd.Parameters.Add(new SqlParameter("@server_name", SqlDbType.NVarChar, 200) { Value = ToDbNullable(m.ServerName) });
+        cmd.Parameters.Add(new SqlParameter("@short_description", SqlDbType.NVarChar, 500) { Value = ToDbNullable(m.ShortDescription) });
+
+        cmd.Parameters.Add(new SqlParameter("@system_type_id", SqlDbType.Int) { Value = ToDbNullable(m.SystemTypeId) });
+        cmd.Parameters.Add(new SqlParameter("@system_scope_id", SqlDbType.Int) { Value = ToDbNullable(m.SystemScopeId) });
+        cmd.Parameters.Add(new SqlParameter("@system_criticality_id", SqlDbType.Int) { Value = ToDbNullable(m.SystemCriticalityId) });
+        cmd.Parameters.Add(new SqlParameter("@system_hosting_type_id", SqlDbType.Int) { Value = ToDbNullable(m.SystemHostingTypeId) });
+
+        cmd.Parameters.Add(new SqlParameter("@system_owner_id", SqlDbType.Int) { Value = ToDbNullable(m.SystemOwnerId) });
+        cmd.Parameters.Add(new SqlParameter("@data_owner_id", SqlDbType.Int) { Value = ToDbNullable(m.DataOwnerId) });
+        cmd.Parameters.Add(new SqlParameter("@primary_administrator_id", SqlDbType.Int) { Value = ToDbNullable(m.PrimaryAdministratorId) });
+        cmd.Parameters.Add(new SqlParameter("@secondary_administrator_id", SqlDbType.Int) { Value = ToDbNullable(m.SecondaryAdministratorId) });
+
+        cmd.Parameters.Add(new SqlParameter("@last_backup_status", SqlDbType.NVarChar, 200) { Value = ToDbNullable(m.LastBackupStatus) });
+        cmd.Parameters.Add(new SqlParameter("@last_backup_date", SqlDbType.DateTime2) { Value = ToDbNullable(m.LastBackupDate) });
+        cmd.Parameters.Add(new SqlParameter("@backup_frequently", SqlDbType.NVarChar, 100) { Value = ToDbNullable(m.BackupFrequently) });
+
+        cmd.Parameters.Add(new SqlParameter("@notes", SqlDbType.NVarChar) { Value = ToDbNullable(m.Notes) });
+    }
+
+    private static async Task<List<LookupItemMini>> LoadSimpleLookupAsync(SqlConnection con, string tableName)
+    {
+        var sql = $@"
+SELECT id, name, sort_order
+FROM {tableName}
+ORDER BY ISNULL(sort_order, 2147483647), name;";
+
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        using var r = await cmd.ExecuteReaderAsync();
+
+        var list = new List<LookupItemMini>();
+        while (await r.ReadAsync())
+        {
+            list.Add(new LookupItemMini
+            {
+                Id = SafeInt(r, "id"),
+                Name = SafeString(r, "name"),
+                SortOrder = SafeNullableInt(r, "sort_order")
+            });
+        }
+
+        return list;
+    }
+
+    private static async Task<List<UserLookupMini>> LoadUsersLookupAsync(SqlConnection con)
+    {
+        var displayCol = await DetectUsersDisplayColumnAsync(con);
+
+        var sql = $@"
+SELECT TOP 5000
+    id,
+    Display = CAST({QuoteName(displayCol)} AS nvarchar(255))
+FROM dbo.users
+ORDER BY Display;";
+
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        using var r = await cmd.ExecuteReaderAsync();
+
+        var list = new List<UserLookupMini>();
+        while (await r.ReadAsync())
+        {
+            list.Add(new UserLookupMini
+            {
+                Id = SafeInt(r, "id"),
+                Display = SafeString(r, "Display")
+            });
+        }
+
+        return list;
+    }
+
+    private static async Task<string> DetectUsersDisplayColumnAsync(SqlConnection con)
+    {
+        var candidates = new[]
+        {
+            "DisplayName",
+            "display_name",
+            "full_name",
+            "user_name",
+            "login",
+            "name",
+            "email",
+            "EmailAddress",
+            "SamAccountName",
+            "samaccountname"
+        };
+
+        foreach (var col in candidates)
+        {
+            if (await ColumnExistsAsync(con, "dbo.users", col))
+                return col;
+        }
+
+        return "id";
+    }
+
+    private static async Task<bool> ColumnExistsAsync(SqlConnection con, string tableName, string columnName)
+    {
+        const string sql = @"SELECT CASE WHEN COL_LENGTH(@table, @col) IS NOT NULL THEN 1 ELSE 0 END;";
+        using var cmd = new SqlCommand(sql, con) { CommandType = CommandType.Text, CommandTimeout = 25 };
+        cmd.Parameters.Add(new SqlParameter("@table", SqlDbType.NVarChar, 256) { Value = tableName });
+        cmd.Parameters.Add(new SqlParameter("@col", SqlDbType.NVarChar, 128) { Value = columnName });
+
+        var obj = await cmd.ExecuteScalarAsync();
+        return Convert.ToInt32(obj) == 1;
+    }
+
+    private static string QuoteName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "[id]";
+
+        return "[" + name.Replace("]", "]]") + "]";
+    }
+
+    private static object ToDbNullable(string? v)
+        => string.IsNullOrWhiteSpace(v) ? DBNull.Value : v.Trim();
+
+    private static object ToDbNullable(int? v)
+        => v.HasValue ? v.Value : DBNull.Value;
+
+    private static object ToDbNullable(DateTime? v)
+        => v.HasValue ? v.Value : DBNull.Value;
+
+    private static string GetSafe(string? value, string fallback = "")
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? fallback : v;
+    }
+
+    private static string FormatDate(DateTime? dt)
+        => dt.HasValue ? dt.Value.ToString("yyyy-MM-dd") : "-";
+
+    private string GetSummaryLine()
+    {
+        var parts = new List<string>();
+
+        var server = GetSafe(_model.ServerName);
+        var db = GetSafe(_model.DbName);
+
+        if (!string.IsNullOrWhiteSpace(server) || !string.IsNullOrWhiteSpace(db))
+        {
+            if (!string.IsNullOrWhiteSpace(server) && !string.IsNullOrWhiteSpace(db))
+                parts.Add($"{server}\\{db}");
+            else
+                parts.Add(!string.IsNullOrWhiteSpace(server) ? server : db);
+        }
+
+        var typeName = LookupName(_lookupTypes, _model.SystemTypeId);
+        var scopeName = LookupName(_lookupScopes, _model.SystemScopeId);
+        var critName = LookupName(_lookupCriticalities, _model.SystemCriticalityId);
+        var hostName = LookupName(_lookupHostingTypes, _model.SystemHostingTypeId);
+
+        var cls = string.Join(", ", new[] { typeName, scopeName, critName, hostName }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        if (!string.IsNullOrWhiteSpace(cls))
+            parts.Add(cls);
+
+        var txt = string.Join(" | ", parts);
+        return string.IsNullOrWhiteSpace(txt) ? " " : txt;
+    }
+
+    private static string LookupName(List<LookupItemMini> list, int? id)
+    {
+        if (!id.HasValue || id.Value <= 0 || list == null || list.Count == 0)
+            return string.Empty;
+
+        var it = list.FirstOrDefault(x => x.Id == id.Value);
+        return it?.Name ?? string.Empty;
+    }
+
+    private string UserName(int? id)
+    {
+        if (!id.HasValue || id.Value <= 0 || _lookupUsers == null || _lookupUsers.Count == 0)
+            return string.Empty;
+
+        var u = _lookupUsers.FirstOrDefault(x => x.Id == id.Value);
+        return u?.Display ?? string.Empty;
+    }
+
+    private void OnSystemNameChanged(string? v) { _model.SystemName = v ?? string.Empty; MarkDirty(); }
+    private void OnShortDescriptionChanged(string? v) { _model.ShortDescription = v ?? string.Empty; MarkDirty(); }
+    private void OnServerNameChanged(string? v) { _model.ServerName = v ?? string.Empty; MarkDirty(); }
+    private void OnDbNameChanged(string? v) { _model.DbName = v ?? string.Empty; MarkDirty(); }
+
+    private void OnLastBackupStatusChanged(string? v) { _model.LastBackupStatus = v ?? string.Empty; MarkDirty(); }
+    private void OnBackupFrequentlyChanged(string? v) { _model.BackupFrequently = v ?? string.Empty; MarkDirty(); }
+    private void OnLastBackupDateChanged(DateTime? v) { _model.LastBackupDate = v; MarkDirty(); }
+
+    private void OnNotesChanged(string? v) { _model.Notes = v ?? string.Empty; MarkDirty(); }
+
+    private sealed class SystemEditModel
+    {
+        public int Id { get; set; }
+
+        public string SystemName { get; set; } = string.Empty;
+        public string ShortDescription { get; set; } = string.Empty;
+
+        public string ServerName { get; set; } = string.Empty;
+        public string DbName { get; set; } = string.Empty;
+
+        public int? SystemTypeId { get; set; }
+        public int? SystemScopeId { get; set; }
+        public int? SystemCriticalityId { get; set; }
+        public int? SystemHostingTypeId { get; set; }
+
+        public int? SystemOwnerId { get; set; }
+        public int? DataOwnerId { get; set; }
+        public int? PrimaryAdministratorId { get; set; }
+        public int? SecondaryAdministratorId { get; set; }
+
+        public string LastBackupStatus { get; set; } = string.Empty;
+        public DateTime? LastBackupDate { get; set; }
+        public string BackupFrequently { get; set; } = string.Empty;
+
+        public string Notes { get; set; } = string.Empty;
+    }
+
+    private sealed class LookupItemMini
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int? SortOrder { get; set; }
+    }
+
+    private sealed class UserLookupMini
+    {
+        public int Id { get; set; }
+        public string Display { get; set; } = string.Empty;
+    }
+
+    private static string SafeString(SqlDataReader r, string col)
+    {
+        try
+        {
+            var idx = r.GetOrdinal(col);
+            if (r.IsDBNull(idx))
+                return string.Empty;
+
+            return Convert.ToString(r.GetValue(idx)) ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static int SafeInt(SqlDataReader r, string col)
+    {
+        try
+        {
+            var idx = r.GetOrdinal(col);
+            if (r.IsDBNull(idx))
+                return 0;
+
+            return Convert.ToInt32(r.GetValue(idx));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static int? SafeNullableInt(SqlDataReader r, string col)
+    {
+        try
+        {
+            var idx = r.GetOrdinal(col);
+            if (r.IsDBNull(idx))
+                return null;
+
+            return Convert.ToInt32(r.GetValue(idx));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static DateTime? SafeNullableDateTime(SqlDataReader r, string col)
+    {
+        try
+        {
+            var idx = r.GetOrdinal(col);
+            if (r.IsDBNull(idx))
+                return null;
+
+            return Convert.ToDateTime(r.GetValue(idx));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}

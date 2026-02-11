@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="NoAccess.View" xml:space="preserve"><value>Brak uprawnień do podglądu kart SIM.</value></data>
+	<data name="NoAccess.Edit" xml:space="preserve"><value>Brak uprawnień do edycji.</value></data>
+
+	<data name="Loading.Data" xml:space="preserve"><value>Ładowanie danych...</value></data>
+	<data name="Saving" xml:space="preserve"><value>Zapisuję...</value></data>
+
+	<data name="Common.Dash" xml:space="preserve"><value>-</value></data>
+
+	<data name="Badge.ReadOnly" xml:space="preserve"><value>Tylko podgląd</value></data>
+	<data name="Badge.Unsaved" xml:space="preserve"><value>Niezapisane</value></data>
+
+	<data name="Field.Type" xml:space="preserve"><value>Typ</value></data>
+	<data name="Field.Operator" xml:space="preserve"><value>Operator</value></data>
+	<data name="Field.Plan" xml:space="preserve"><value>Plan</value></data>
+	<data name="Field.Status" xml:space="preserve"><value>Status</value></data>
+	<data name="Field.User" xml:space="preserve"><value>Użytkownik</value></data>
+	<data name="Field.MobileNumber" xml:space="preserve"><value>Numer telefonu</value></data>
+	<data name="Field.SimCardNumber" xml:space="preserve"><value>Numer karty SIM</value></data>
+	<data name="Field.NoteLabelBlank" xml:space="preserve"><value> </value></data>
+
+	<data name="Field.MobileNumberShort" xml:space="preserve"><value>Telefon</value></data>
+	<data name="Field.SimCardNumberShort" xml:space="preserve"><value>SIM</value></data>
+
+	<data name="Tooltip.CopyMobile" xml:space="preserve"><value>Kopiuj numer telefonu</value></data>
+	<data name="Tooltip.CopySim" xml:space="preserve"><value>Kopiuj numer karty SIM</value></data>
+
+	<data name="Clipboard.Mobile" xml:space="preserve"><value>Numer telefonu</value></data>
+	<data name="Clipboard.Sim" xml:space="preserve"><value>Numer karty SIM</value></data>
+
+	<data name="Tab.General" xml:space="preserve"><value>Ogólne</value></data>
+	<data name="Tab.Numbers" xml:space="preserve"><value>Numery</value></data>
+	<data name="Tab.Note" xml:space="preserve"><value>Notatka</value></data>
+	<data name="Tab.History" xml:space="preserve"><value>Historia</value></data>
+
+	<data name="History.Todo" xml:space="preserve"><value>Historia: do zaimplementowania (log zmian, audyt, zdarzenia).</value></data>
+
+	<data name="Button.EnableEdit" xml:space="preserve"><value>Włącz edycję</value></data>
+	<data name="Button.Lock" xml:space="preserve"><value>Zablokuj</value></data>
+	<data name="Button.Save" xml:space="preserve"><value>Zapisz</value></data>
+	<data name="Button.Close" xml:space="preserve"><value>Zamknij</value></data>
+
+	<data name="Title.SimPrefix" xml:space="preserve"><value>SIM</value></data>
+	<data name="Title.SimCard" xml:space="preserve"><value>Karta SIM</value></data>
+	<data name="Subtitle.OperatorPlan" xml:space="preserve"><value>{0} (Plan: {1})</value></data>
+
+	<data name="Error.LoadLookups" xml:space="preserve"><value>Nie udało się wczytać słowników do pól.</value></data>
+	<data name="Error.LoadSimCard" xml:space="preserve"><value>Nie udało się wczytać karty SIM.</value></data>
+	<data name="Error.NotFoundById" xml:space="preserve"><value>Nie znaleziono karty SIM dla Id: {0}</value></data>
+	<data name="Error.LoadSimCardTryLater" xml:space="preserve"><value>Nie udało się wczytać karty SIM. Spróbuj ponownie później.</value></data>
+
+	<data name="Error.Save" xml:space="preserve"><value>Nie udało się zapisać zmian.</value></data>
+	<data name="Error.SaveGeneric" xml:space="preserve"><value>Błąd podczas zapisu.</value></data>
+
+	<data name="Toast.Saved" xml:space="preserve"><value>Zapisano.</value></data>
+	<data name="Toast.Copied" xml:space="preserve"><value>Skopiowano: {0}</value></data>
+
+	<data name="Error.CopyClipboard" xml:space="preserve"><value>Nie udało się skopiować do schowka.</value></data>
+
+	<data name="Dialog.Unsaved.Title" xml:space="preserve"><value>Niezapisane zmiany</value></data>
+	<data name="Dialog.Unsaved.Message" xml:space="preserve"><value>Masz niezapisane zmiany. Wyjść z ekranu i odrzucić zmiany?</value></data>
+	<data name="Dialog.Unsaved.YesDiscard" xml:space="preserve"><value>Odrzuć i wyjdź</value></data>
+	<data name="Dialog.Unsaved.NoStay" xml:space="preserve"><value>Zostań</value></data>
+</root>

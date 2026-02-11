@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="metadata">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" />
+							</xsd:sequence>
+							<xsd:attribute name="name" use="required" type="xsd:string" />
+							<xsd:attribute name="type" type="xsd:string" />
+							<xsd:attribute name="mimetype" type="xsd:string" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="assembly">
+						<xsd:complexType>
+							<xsd:attribute name="alias" type="xsd:string" />
+							<xsd:attribute name="name" type="xsd:string" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>Licencje</value>
+  </data>
+
+	<!-- Top bar -->
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Szukaj...</value>
+  </data>
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Wyczyść</value>
+  </data>
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Filtry zaawansowane</value>
+  </data>
+
+	<!-- Permissions / errors -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>Brak uprawnień do podglądu licencji.</value>
+  </data>
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>Brak uprawnień do edycji licencji.</value>
+  </data>
+	<data name="NoCreatePermission" xml:space="preserve">
+    <value>Brak uprawnień do tworzenia licencji.</value>
+  </data>
+
+	<data name="LoadingData" xml:space="preserve">
+    <value>Wczytywanie danych...</value>
+  </data>
+	<data name="LoadFailedTryLater" xml:space="preserve">
+    <value>Nie udało się wczytać danych. Spróbuj ponownie później.</value>
+  </data>
+	<data name="GenericLoadError" xml:space="preserve">
+    <value>Wystąpił błąd podczas wczytywania danych.</value>
+  </data>
+	<data name="LoadFailedSnackbar" xml:space="preserve">
+    <value>Nie udało się wczytać danych.</value>
+  </data>
+	<data name="TimeoutError" xml:space="preserve">
+    <value>Przekroczono limit czasu wczytywania po {0} s.</value>
+  </data>
+	<data name="TimeoutSnackbar" xml:space="preserve">
+    <value>Przekroczono limit czasu zapytania.</value>
+  </data>
+	<data name="OpenDialogError" xml:space="preserve">
+    <value>Nie udało się otworzyć okna edycji licencji.</value>
+  </data>
+
+	<!-- Grid -->
+	<data name="NoRecords" xml:space="preserve">
+    <value>Brak rekordów.</value>
+  </data>
+
+	<data name="All" xml:space="preserve">
+    <value>Wszystkie</value>
+  </data>
+
+	<!-- Columns -->
+	<data name="Col.Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+	<data name="Col.Name" xml:space="preserve">
+    <value>Nazwa</value>
+  </data>
+	<data name="Col.Producer" xml:space="preserve">
+    <value>Producent</value>
+  </data>
+	<data name="Col.Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Col.InventoryNo" xml:space="preserve">
+    <value>Nr inw.</value>
+  </data>
+	<data name="Col.User" xml:space="preserve">
+    <value>Użytkownik</value>
+  </data>
+	<data name="Col.SubscriptionStart" xml:space="preserve">
+    <value>Start</value>
+  </data>
+	<data name="Col.SubscriptionEnd" xml:space="preserve">
+    <value>Koniec</value>
+  </data>
+	<data name="Col.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<!-- Subscription filter -->
+	<data name="SubscriptionLabel" xml:space="preserve">
+    <value>Subskrypcja</value>
+  </data>
+	<data name="Sub.Active" xml:space="preserve">
+    <value>Aktywna</value>
+  </data>
+	<data name="Sub.Expired" xml:space="preserve">
+    <value>Wygasła</value>
+  </data>
+	<data name="Sub.EndsSoon" xml:space="preserve">
+    <value>Kończy się</value>
+  </data>
+	<data name="Sub.NoDates" xml:space="preserve">
+    <value>Brak dat</value>
+  </data>
+
+	<!-- Actions -->
+	<data name="AddLicense" xml:space="preserve">
+    <value>Dodaj licencję</value>
+  </data>
+
+	<!-- Txt(...) fallback keys used in code -->
+	<data name="ExportExcel" xml:space="preserve">
+    <value>Eksportuj do Excela</value>
+  </data>
+	<data name="Overlay_Exporting" xml:space="preserve">
+    <value>Eksportuję dane...</value>
+  </data>
+	<data name="Msg_NoRecordsToExport" xml:space="preserve">
+    <value>Brak danych do eksportu.</value>
+  </data>
+	<data name="Msg_ExportDone" xml:space="preserve">
+    <value>Eksport zakończony.</value>
+  </data>
+	<data name="Msg_ExportFailed" xml:space="preserve">
+    <value>Eksport nieudany. Spróbuj ponownie.</value>
+  </data>
+</root>

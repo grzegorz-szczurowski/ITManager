@@ -1,0 +1,187 @@
+﻿@namespace ITManager.Components.Pages.Administration
+
+@* File: Components/Pages/Admin/DictionaryEditDialog.razor
+   Description: Dialog edycji wpisu słownika oparty o jeden model DictionaryItem. Pola zależne od typu słownika.
+                Locations: tylko Name + IsActive (bez Code).
+                Models: wybór producenta zapisuje producer_id (ParentId).
+   Created: 2025-12-23
+   Version: 1.07
+   Change log:
+   - 1.04 (2025-12-23) Kompatybilność: IMudDialogInstance zamiast MudDialogInstance.
+   - 1.05 (2025-12-27) Usunięcie Code dla Locations. Naprawa bindowania producenta (@bind-Value) dla Models.
+   - 1.06 (2026-01-09) UX polish: defensywne OnParametersSet, walidacja pola Name bez alertu, blokada Save gdy brak nazwy.
+   - 1.07 (2026-01-26) i18n: przeniesienie stringów UI do resx (IStringLocalizer)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Models
+
+@inject IStringLocalizer<DictionaryEditDialog> L
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+
+            <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@Title</MudText>
+
+            <MudTextField T="string"
+                          Label="@L["Label_Name"]"
+                          Value="@_name"
+                          ValueChanged="OnNameChanged"
+                          Immediate="true"
+                          Required="true"
+                          Error="@_nameError"
+                          ErrorText="@_nameErrorText" />
+
+            @if (IsModel)
+            {
+                <MudSelect T="int?"
+                           Label="@L["Label_Producer"]"
+                           Dense="true"
+                           Clearable="true"
+                           Disabled="@_isBusy"
+                           @bind-Value="_parentId">
+                    @foreach (var p in ProducersSorted)
+                    {
+                        <MudSelectItem T="int?" Value="@p.Id">@p.Name</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudText Typo="Typo.caption" Style="opacity:0.8;">
+                    @L["Hint_ModelProducer"]
+                </MudText>
+            }
+
+            <MudSwitch T="bool"
+                       Label="@L["Label_Active"]"
+                       Color="Color.Primary"
+                       Disabled="@_isBusy"
+                       @bind-Value="_isActive" />
+
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Outlined"
+                   Disabled="@_isBusy"
+                   OnClick="Cancel">
+            @L["Btn_Cancel"]
+        </MudButton>
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@SaveDisabled"
+                   OnClick="Save">
+            @L["Btn_Save"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code
+{
+    [CascadingParameter] private IMudDialogInstance DialogInstance { get; set; } = default!;
+
+    [Parameter] public string Title { get; set; } = "Edycja";
+    [Parameter] public string Kind { get; set; } = string.Empty;
+    [Parameter] public DictionaryItem Item { get; set; } = new DictionaryItem();
+    [Parameter] public List<DictionaryItem> Producers { get; set; } = new();
+
+    private bool _isBusy;
+
+    private string _name = string.Empty;
+    private int? _parentId;
+    private bool _isActive = true;
+
+    private bool _nameError;
+    private string _nameErrorText = string.Empty;
+
+    private bool IsModel => string.Equals((Kind ?? string.Empty).Trim(), "Models", StringComparison.OrdinalIgnoreCase);
+
+    private List<DictionaryItem> ProducersSorted => (Producers ?? new List<DictionaryItem>())
+        .Where(x => x is not null)
+        .OrderBy(x => x.Name)
+        .ToList();
+
+    private bool SaveDisabled => _isBusy || string.IsNullOrWhiteSpace((_name ?? string.Empty).Trim());
+
+    protected override void OnParametersSet()
+    {
+        Item ??= new DictionaryItem();
+
+        _name = Item.Name ?? string.Empty;
+        _isActive = Item.IsActive;
+
+        _parentId = IsModel ? Item.ParentId : null;
+
+        ClearNameError();
+    }
+
+    private void OnNameChanged(string value)
+    {
+        _name = value ?? string.Empty;
+        ClearNameError();
+    }
+
+    private void ClearNameError()
+    {
+        _nameError = false;
+        _nameErrorText = string.Empty;
+    }
+
+    private void Cancel()
+    {
+        if (_isBusy)
+            return;
+
+        DialogInstance.Cancel();
+    }
+
+    private void Save()
+    {
+        if (_isBusy)
+            return;
+
+        var trimmedName = (_name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            _nameError = true;
+            _nameErrorText = L["Err_NameRequired"];
+            return;
+        }
+
+        _isBusy = true;
+
+        try
+        {
+            Item.Name = trimmedName;
+            Item.IsActive = _isActive;
+
+            if (IsModel)
+            {
+                Item.ParentId = _parentId;
+                Item.ParentName = _parentId.HasValue
+                    ? ProducersSorted.FirstOrDefault(x => x.Id == _parentId.Value)?.Name
+                    : null;
+            }
+            else
+            {
+                Item.ParentId = null;
+                Item.ParentName = null;
+            }
+
+            // Code świadomie nieużywane (nie chcemy go ani w UI ani w DB)
+            Item.Code = null;
+
+            DialogInstance.Close(DialogResult.Ok(Item));
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}

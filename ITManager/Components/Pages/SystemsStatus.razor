@@ -1,0 +1,505 @@
+﻿@page "/systems-status"
+@rendermode InteractiveServer
+@implements IDisposable
+
+@using System
+@using System.Collections.Generic
+@using System.Collections.ObjectModel
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Services.Auth
+@using Microsoft.AspNetCore.Components
+
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+
+@* File: Components/Pages/SystemsStatus.razor
+   Description: Podgląd statusów kluczowych systemów firmy (SAP, T-MES, Email, serwery itp.) w formie czytelnych kafli + incydenty.
+   RBAC: wymaga permission Systems.Status.View.
+   Created: 2025-12-19
+   Version: 1.02
+   Updated: 2026-01-09 - RBAC: Systems.Status.View, kontrola uwierzytelnienia i aktywności, bezpieczne auto-odświeżanie.
+   Notes:
+   - Cel: ograniczyć powtarzalne zgłoszenia przez szybki, jednoznaczny widok aktualnych statusów.
+   - Dane są obecnie przykładowe. Podpięcie do ITManager: metoda RefreshFromDataSourceAsync(). *@
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="3">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <div>
+                <MudText Typo="Typo.h5">Statusy systemów</MudText>
+                <MudText Typo="Typo.subtitle2" Style="opacity:0.8;">
+                    Aktualny stan kluczowych usług. Sprawdź tutaj przed zgłoszeniem, żeby uniknąć duplikatów.
+                </MudText>
+            </div>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudChip T="string" Color="@GetOverallColor()" Variant="Variant.Filled" Size="Size.Medium">
+                    @GetOverallLabel()
+                </MudChip>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           Disabled="@(!_canView || _isLoading)"
+                           OnClick="ManualRefresh">
+                    Odśwież
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.ConfirmationNumber"
+                           Disabled="@(!_canCreateTicket)"
+                           OnClick="GoToCreateTicket">
+                    Zgłoś problem
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        @if (_isInitializing)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudProgressCircular Indeterminate="true" />
+                <MudText Typo="Typo.body2">Ładowanie...</MudText>
+            </MudStack>
+        }
+        else if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Filled">
+                Brak uprawnień do podglądu statusów systemów.
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Variant="Variant.Outlined">
+                <MudText Typo="Typo.body2">
+                    Jeśli status jest "Degradacja" albo "Awaria", nie dzwoń kilka razy. Zgłoszenia łączymy w jeden incydent,
+                    a aktualizacje pojawiają się tutaj. Sprawdź też "Szybkie kroki" poniżej.
+                </MudText>
+            </MudAlert>
+
+            @if (_isLoading)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudProgressCircular Indeterminate="true" />
+                    <MudText Typo="Typo.body2">Ładowanie statusów...</MudText>
+                </MudStack>
+            }
+            else
+            {
+                <MudGrid GutterSize="GutterSize.Small">
+                    @foreach (var item in _systems)
+                    {
+                        <MudItem xs="12" sm="6" md="4" lg="3">
+                            <MudCard Class="pa-4" Elevation="0" Style="@GetCardStyle(item.State)">
+                                <MudStack Spacing="2">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudIcon Icon="@item.Icon" />
+                                            <MudText Typo="Typo.subtitle1" Style="font-weight:600;">
+                                                @item.Name
+                                            </MudText>
+                                        </MudStack>
+
+                                        <MudChip T="string" Color="@GetChipColor(item.State)" Variant="Variant.Filled" Size="Size.Small">
+                                            @GetStateLabel(item.State)
+                                        </MudChip>
+                                    </MudStack>
+
+                                    <MudText Typo="Typo.body2" Style="opacity:0.85;">
+                                        @item.Summary
+                                    </MudText>
+
+                                    @if (!string.IsNullOrWhiteSpace(item.Impact))
+                                    {
+                                        <MudText Typo="Typo.caption" Style="opacity:0.8;">
+                                            Wpływ: @item.Impact
+                                        </MudText>
+                                    }
+
+                                    <MudDivider />
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                        <MudText Typo="Typo.caption" Style="opacity:0.8;">
+                                            Aktualizacja: @FormatTime(item.LastUpdated)
+                                        </MudText>
+
+                                        @if (!string.IsNullOrWhiteSpace(item.Eta))
+                                        {
+                                            <MudText Typo="Typo.caption" Style="font-weight:600;">
+                                                ETA: @item.Eta
+                                            </MudText>
+                                        }
+                                    </MudStack>
+                                </MudStack>
+                            </MudCard>
+                        </MudItem>
+                    }
+                </MudGrid>
+
+                <MudCard Class="pa-4" Elevation="0">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.h6">Aktywne incydenty</MudText>
+
+                        @if (_incidents.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Style="opacity:0.85;">
+                                Brak aktywnych incydentów. Jeśli masz problem, sprawdź szybkie kroki i utwórz zgłoszenie.
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudTable Items="_incidents" Dense="true" Hover="true" Elevation="0">
+                                <HeaderContent>
+                                    <MudTh>System</MudTh>
+                                    <MudTh>Opis</MudTh>
+                                    <MudTh Style="text-align:right;">Status</MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd>@context.SystemName</MudTd>
+                                    <MudTd>@context.Description</MudTd>
+                                    <MudTd Style="text-align:right;">
+                                        <MudChip T="string" Color="@GetChipColor(context.State)" Variant="Variant.Filled" Size="Size.Small">
+                                            @GetStateLabel(context.State)
+                                        </MudChip>
+                                    </MudTd>
+                                </RowTemplate>
+                            </MudTable>
+
+                            <MudText Typo="Typo.caption" Style="opacity:0.8;">
+                                Ostatnie odświeżenie: @_lastRefreshText
+                            </MudText>
+                        }
+                    </MudStack>
+                </MudCard>
+
+                <MudCard Class="pa-4" Elevation="0">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.h6">Szybkie kroki zanim zgłosisz</MudText>
+
+                        <MudGrid GutterSize="GutterSize.Small">
+                            <MudItem xs="12" md="6">
+                                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">Sieć i logowanie</MudText>
+                                    <MudText Typo="Typo.body2">
+                                        1) Sprawdź VPN (jeśli pracujesz zdalnie). 2) Wyloguj i zaloguj się ponownie.
+                                        3) Jeśli problem dotyczy tylko Ciebie, zrestartuj komputer.
+                                    </MudText>
+                                </MudAlert>
+                            </MudItem>
+
+                            <MudItem xs="12" md="6">
+                                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">Aplikacje i przeglądarka</MudText>
+                                    <MudText Typo="Typo.body2">
+                                        1) Zamknij aplikację i uruchom ponownie. 2) Dla web: odśwież stronę Ctrl+F5.
+                                        3) Spróbuj w innej przeglądarce.
+                                    </MudText>
+                                </MudAlert>
+                            </MudItem>
+                        </MudGrid>
+
+                        <MudDivider />
+
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.caption" Style="opacity:0.8;">
+                                Ta strona jest po to, żeby ograniczyć duplikaty zgłoszeń i przyspieszyć reakcję IT.
+                            </MudText>
+
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.HelpOutline"
+                                       OnClick="ShowHowToReport">
+                                Jak zgłaszać
+                            </MudButton>
+                        </MudStack>
+                    </MudStack>
+                </MudCard>
+            }
+        }
+
+    </MudStack>
+</MudPaper>
+
+@code
+{
+    private const string PermSystemsStatusView = "SystemsStatus.View";
+    private const string PermTicketsView = "Tickets.View";
+
+    private bool _isInitializing = true;
+    private bool _isLoading = true;
+
+    private bool _canView;
+    private bool _canCreateTicket;
+
+    private string _lastRefreshText = string.Empty;
+
+    private readonly ObservableCollection<SystemStatusRow> _systems = new();
+    private readonly ObservableCollection<IncidentRow> _incidents = new();
+
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+    private Task? _refreshLoopTask;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            if (!ctx.IsAuthenticated || ctx.IsActive != true)
+            {
+                _canView = false;
+                NavigationManager.NavigateTo("/", replace: true);
+                return;
+            }
+
+            _canView = ctx.Has(PermSystemsStatusView);
+
+            // Przycisk "Zgłoś problem" tylko jeśli user ma chociaż Tickets.View (w praktyce i tak walidujesz na /tickets/new)
+            _canCreateTicket = ctx.Has(PermTicketsView);
+
+            if (_canView)
+            {
+                await RefreshFromDataSourceAsync();
+                StartAutoRefresh();
+            }
+            else
+            {
+                _isLoading = false;
+            }
+        }
+        finally
+        {
+            _isInitializing = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+        }
+        catch { }
+
+        try
+        {
+            _refreshTimer?.Dispose();
+        }
+        catch { }
+
+        try
+        {
+            _refreshCts?.Dispose();
+        }
+        catch { }
+    }
+
+    private void StartAutoRefresh()
+    {
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+
+        _refreshLoopTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (_refreshTimer != null && await _refreshTimer.WaitForNextTickAsync(_refreshCts!.Token))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        if (!_canView)
+                            return;
+
+                        await RefreshFromDataSourceAsync();
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+            }
+        });
+    }
+
+    private async Task ManualRefresh()
+    {
+        if (!_canView)
+            return;
+
+        await RefreshFromDataSourceAsync();
+        Snackbar.Add("Statusy odświeżone.", Severity.Info);
+    }
+
+    private void GoToCreateTicket()
+    {
+        // W Twoim kodzie TicketCreate jest pod /tickets/new (wg wcześniejszych plików)
+        NavigationManager.NavigateTo("/tickets/new");
+    }
+
+    private void ShowHowToReport()
+    {
+        Snackbar.Add("W zgłoszeniu podaj: system, dokładny błąd, godzinę, screen, lokalizację, czy dotyczy wielu osób.", Severity.Normal);
+    }
+
+    private async Task RefreshFromDataSourceAsync()
+    {
+        _isLoading = true;
+
+        try
+        {
+            await Task.Delay(80);
+
+            var now = DateTime.Now;
+
+            var sample = new List<SystemStatusRow>
+            {
+                new("SAP", Icons.Material.Filled.BusinessCenter, SystemState.Operational, "Brak zgłoszonych problemów.", "", now.AddMinutes(-8), ""),
+                new("T-MES", Icons.Material.Filled.Factory, SystemState.Degraded, "Sporadyczne opóźnienia logowania na terminalach.", "Część użytkowników na produkcji", now.AddMinutes(-5), "30-60 min"),
+                new("Poczta Email", Icons.Material.Filled.Email, SystemState.Operational, "Działa poprawnie.", "", now.AddMinutes(-12), ""),
+                new("Active Directory", Icons.Material.Filled.Badge, SystemState.Operational, "Logowanie domenowe OK.", "", now.AddMinutes(-10), ""),
+                new("Pliki i udziały", Icons.Material.Filled.FolderShared, SystemState.Operational, "Udziały sieciowe dostępne.", "", now.AddMinutes(-9), ""),
+                new("Drukarki", Icons.Material.Filled.Print, SystemState.Degraded, "Kolejka wydruku wolniejsza niż zwykle.", "Możliwe opóźnienia drukowania", now.AddMinutes(-6), ""),
+                new("VPN", Icons.Material.Filled.VpnLock, SystemState.Operational, "Brak incydentów.", "", now.AddMinutes(-15), ""),
+                new("WiFi", Icons.Material.Filled.Wifi, SystemState.Operational, "Stabilne połączenia.", "", now.AddMinutes(-11), ""),
+                new("SQL Server", Icons.Material.Filled.Storage, SystemState.Operational, "Bazy dostępne.", "", now.AddMinutes(-7), ""),
+                new("Intranet", Icons.Material.Filled.Dashboard, SystemState.Operational, "Portal działa.", "", now.AddMinutes(-4), "")
+            };
+
+            var incidents = new List<IncidentRow>
+            {
+                new("T-MES", SystemState.Degraded, "Opóźnienia logowania na części terminali. Trwa analiza."),
+                new("Drukarki", SystemState.Degraded, "Opóźnienia w kolejce wydruku. Prosimy nie wysyłać wydruków wielokrotnie.")
+            };
+
+            _systems.Clear();
+            foreach (var s in sample)
+                _systems.Add(s);
+
+            _incidents.Clear();
+            foreach (var i in incidents)
+                _incidents.Add(i);
+
+            _lastRefreshText = now.ToString("yyyy-MM-dd HH:mm");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private Color GetChipColor(SystemState state)
+        => state switch
+        {
+            SystemState.Operational => Color.Success,
+            SystemState.Degraded => Color.Warning,
+            SystemState.Outage => Color.Error,
+            SystemState.Maintenance => Color.Info,
+            _ => Color.Default
+        };
+
+    private string GetStateLabel(SystemState state)
+        => state switch
+        {
+            SystemState.Operational => "OK",
+            SystemState.Degraded => "Degradacja",
+            SystemState.Outage => "Awaria",
+            SystemState.Maintenance => "Serwis",
+            _ => "Nieznany"
+        };
+
+    private string GetOverallLabel()
+    {
+        if (_systems.Any(x => x.State == SystemState.Outage))
+            return "Awaria w systemach";
+
+        if (_systems.Any(x => x.State == SystemState.Degraded))
+            return "Częściowa degradacja";
+
+        if (_systems.Any(x => x.State == SystemState.Maintenance))
+            return "Prace serwisowe";
+
+        return "Wszystko działa";
+    }
+
+    private Color GetOverallColor()
+    {
+        if (_systems.Any(x => x.State == SystemState.Outage))
+            return Color.Error;
+
+        if (_systems.Any(x => x.State == SystemState.Degraded))
+            return Color.Warning;
+
+        if (_systems.Any(x => x.State == SystemState.Maintenance))
+            return Color.Info;
+
+        return Color.Success;
+    }
+
+    private string GetCardStyle(SystemState state)
+        => state switch
+        {
+            SystemState.Operational => "border:1px solid rgba(46,125,50,0.25);",
+            SystemState.Degraded => "border:1px solid rgba(237,108,2,0.25);",
+            SystemState.Outage => "border:1px solid rgba(211,47,47,0.25);",
+            SystemState.Maintenance => "border:1px solid rgba(2,136,209,0.25);",
+            _ => "border:1px solid rgba(0,0,0,0.12);"
+        };
+
+    private static string FormatTime(DateTime value)
+        => value.ToString("HH:mm");
+
+    private enum SystemState
+    {
+        Unknown = 0,
+        Operational = 1,
+        Degraded = 2,
+        Outage = 3,
+        Maintenance = 4
+    }
+
+    private sealed class SystemStatusRow
+    {
+        public SystemStatusRow(string name, string icon, SystemState state, string summary, string impact, DateTime lastUpdated, string eta)
+        {
+            Name = name;
+            Icon = icon;
+            State = state;
+            Summary = summary;
+            Impact = impact;
+            LastUpdated = lastUpdated;
+            Eta = eta;
+        }
+
+        public string Name { get; }
+        public string Icon { get; }
+        public SystemState State { get; }
+        public string Summary { get; }
+        public string Impact { get; }
+        public DateTime LastUpdated { get; }
+        public string Eta { get; }
+    }
+
+    private sealed class IncidentRow
+    {
+        public IncidentRow(string systemName, SystemState state, string description)
+        {
+            SystemName = systemName;
+            State = state;
+            Description = description;
+        }
+
+        public string SystemName { get; }
+        public SystemState State { get; }
+        public string Description { get; }
+    }
+}

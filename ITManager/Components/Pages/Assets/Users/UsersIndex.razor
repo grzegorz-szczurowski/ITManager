@@ -1,0 +1,846 @@
+﻿@page "/assets/users"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Users.View")]
+
+@* File: Components/Pages/Assets/UsersIndex.razor
+   Description: Lista użytkowników (dbo.users) w oparciu o MudDataGrid. Widok spójny z Devices i Tickets.
+                Mechanizm jak w Devices: klik i Add przenoszą na osobną stronę edycji (UserEdit) z returnUrl.
+                Search zawsze widoczny + Advanced filters (collapse) jak w Devices.
+                Filtry dopasowane do Users: Department, Title, Operator, Active.
+   Version: 1.28
+   Updated: 2026-02-08
+     - CHANGE: Edycja użytkownika jako osobna strona (UserEdit), zamiast dialogu.
+     - CHANGE: returnUrl przekazywany w query string (powrót do listy po zapisie/anulowaniu).
+     - UX: klik bez uprawnień nadal pokazuje snackbar, kursor pointer tylko z Edit.
+   Previously:
+     - 2026-01-25 v1.27: Security + Logging + UX + fixed layout
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@implements IAsyncDisposable
+
+@inject UsersService UsersService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<UsersIndex> L
+@inject IJSRuntime JS
+@inject TimeZoneService TimeZoneService
+@inject ILogger<UsersIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewUsers)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_isLoading || _isExporting || !_canViewUsers)"
+                              Class="users-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 users-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewUsers)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewUsers)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewUsers)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="users-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 users-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter.Department"]"
+                                           Value="@_selectedDepartment"
+                                           ValueChanged="OnDepartmentChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsDepartments)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter.Title"]"
+                                           Value="@_selectedTitle"
+                                           ValueChanged="OnTitleChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsTitles)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter.Operator"]"
+                                           Value="@_selectedOperator"
+                                           ValueChanged="OnOperatorChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    <MudSelectItem Value="@BoolTrue">@L["Yes"]</MudSelectItem>
+                                    <MudSelectItem Value="@BoolFalse">@L["No"]</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter.Active"]"
+                                           Value="@_selectedActive"
+                                           ValueChanged="OnActiveChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    <MudSelectItem Value="@BoolTrue">@L["Yes"]</MudSelectItem>
+                                    <MudSelectItem Value="@BoolFalse">@L["No"]</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudStack Row="true"
+                          Justify="Justify.FlexStart"
+                          AlignItems="AlignItems.Center"
+                          Class="mt-3 mb-2">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddUserAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canCreateUsers)">
+                        @L["AddUser"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               Class="ml-2"
+                               OnClick="ExportVisibleToExcelAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewUsers || (_filteredRows?.Count ?? 0) == 0)">
+                        @Txt("ExportExcel", "Export Excel")
+                    </MudButton>
+                </MudStack>
+
+                <MudDataGrid T="UserListRow"
+                             @ref="_grid"
+                             Class="users-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             RowClick="OnRowClickAsync"
+                             @bind-RowsPerPage="_rowsPerPage">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="UserListRow" PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        <PropertyColumn Property="x => x.DisplayName"
+                                        Title="@L["Col.DisplayName"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:13%;"
+                                        CellStyle="width:13%;" />
+
+                        <PropertyColumn Property="x => x.Department"
+                                        Title="@L["Col.Department"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:20%;"
+                                        CellStyle="width:20%;" />
+
+                        <PropertyColumn Property="x => x.Title"
+                                        Title="@L["Col.Title"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:27%;"
+                                        CellStyle="width:27%;" />
+
+                        <PropertyColumn Property="x => x.EmailAddress"
+                                        Title="@L["Col.Email"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:18%;"
+                                        CellStyle="width:18%;" />
+
+                        <PropertyColumn Property="x => x.TelephoneNumber"
+                                        Title="@L["Col.Phone"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="x => x.Mobile"
+                                        Title="@L["Col.Mobile"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="x => x.AccountTypeName"
+                                        Title="@L["Col.AccountType"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:4%;"
+                                        CellStyle="width:4%;" />
+
+                        <TemplateColumn Title="@L["Col.Active"]"
+                                        SortBy="@(x => x.IsActive)"
+                                        HeaderStyle="width:2%;"
+                                        CellStyle="width:2%;">
+                            <CellTemplate Context="context">
+                                @(context.Item.IsActive == true ? L["Yes"].Value : L["No"].Value)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@(_isLoading || _isExporting)"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="users-overlay">
+                    <MudPaper Class="pa-6 users-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @(_isExporting? Txt("Overlay_Exporting", "Eksportuję dane...") : L["LoadingData"])
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .users-row {
+        min-height: 44px;
+    }
+
+        .users-row td,
+        .users-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .users-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .users-row-clickable {
+        cursor: pointer;
+    }
+
+    .users-search {
+        min-width: 400px;
+    }
+
+    .users-filters-panel {
+        border-radius: 8px;
+    }
+
+    .users-clear-btn {
+        border-width: 1px;
+    }
+
+    .users-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .users-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .users-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .users-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .users-grid th,
+    .users-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+    private const string BoolTrue = "true";
+    private const string BoolFalse = "false";
+
+    private static readonly TimeSpan DataLoadTimeout = TimeSpan.FromSeconds(30);
+
+    private bool _ready;
+    private bool _isLoading = true;
+    private bool _isExporting;
+
+    private bool _canViewUsers;
+    private bool _canEditUsers;
+    private bool _canCreateUsers;
+    private bool _canDeleteUsers;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private List<UserListRow> _allRows = new();
+    private List<UserListRow> _filteredRows = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private string _selectedDepartment = AllValue;
+    private string _selectedTitle = AllValue;
+    private string _selectedOperator = AllValue;
+    private string _selectedActive = AllValue;
+
+    private List<string> _lookupsDepartments = new();
+    private List<string> _lookupsTitles = new();
+
+    private MudDataGrid<UserListRow>? _grid;
+    private IJSObjectReference? _downloadModule;
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        _canViewUsers = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Assets.Users.View");
+        _canEditUsers = _canViewUsers && ctx.Has("Assets.Users.Edit");
+        _canCreateUsers = _canViewUsers && ctx.Has("Assets.Users.Create");
+        _canDeleteUsers = _canViewUsers && ctx.Has("Assets.Users.Delete");
+
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        _ready = true;
+
+        if (!_canViewUsers)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private async Task AddUserAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canCreateUsers)
+        {
+            Snackbar.Add(L["NoCreatePermission"], Severity.Warning);
+            return;
+        }
+
+        NavigateToCreate();
+        await Task.CompletedTask;
+    }
+
+    private void NavigateToCreate()
+    {
+        var ret = BuildReturnUrl();
+        NavigationManager.NavigateTo("/assets/users/create?returnUrl=" + Uri.EscapeDataString(ret));
+    }
+
+    private void NavigateToEdit(int id)
+    {
+        var ret = BuildReturnUrl();
+        NavigationManager.NavigateTo("/assets/users/edit/" + id + "?returnUrl=" + Uri.EscapeDataString(ret));
+    }
+
+    private string BuildReturnUrl()
+    {
+        var current = NavigationManager.Uri;
+        return current ?? "/assets/users";
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_isExporting)
+            return;
+
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            var loadTask = UsersService.GetUsersAsync();
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(DataLoadTimeout));
+
+            if (completedTask != loadTask)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = string.Format(L["TimeoutError"], (int)DataLoadTimeout.TotalSeconds);
+                Snackbar.Add(L["TimeoutSnackbar"], Severity.Error);
+                return;
+            }
+
+            var result = await loadTask;
+
+            if (!result.IsOk)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add(L["LoadFailedSnackbar"], Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new();
+
+            BuildLookupsFromRows();
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Users] Load error.");
+            Snackbar.Add(L["LoadFailedTryLater"], Severity.Error);
+
+            _allRows = new();
+            _filteredRows = new();
+            _loadError = L["GenericLoadError"];
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void BuildLookupsFromRows()
+    {
+        var rows = _allRows ?? new List<UserListRow>();
+
+        _lookupsDepartments = rows.Select(x => (x.Department ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsTitles = rows.Select(x => (x.Title ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedDepartment != AllValue && !_lookupsDepartments.Contains(_selectedDepartment, StringComparer.OrdinalIgnoreCase))
+            _selectedDepartment = AllValue;
+
+        if (_selectedTitle != AllValue && !_lookupsTitles.Contains(_selectedTitle, StringComparer.OrdinalIgnoreCase))
+            _selectedTitle = AllValue;
+
+        if (!IsTriStateValue(_selectedOperator))
+            _selectedOperator = AllValue;
+
+        if (!IsTriStateValue(_selectedActive))
+            _selectedActive = AllValue;
+    }
+
+    private static bool IsTriStateValue(string value)
+        => value == AllValue || value == BoolTrue || value == BoolFalse;
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+
+        _selectedDepartment = AllValue;
+        _selectedTitle = AllValue;
+        _selectedOperator = AllValue;
+        _selectedActive = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnDepartmentChangedAsync(string value)
+    {
+        _selectedDepartment = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnTitleChangedAsync(string value)
+    {
+        _selectedTitle = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnOperatorChangedAsync(string value)
+    {
+        _selectedOperator = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnActiveChangedAsync(string value)
+    {
+        _selectedActive = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+        => _filteredRows = BuildFilteredRows();
+
+    private List<UserListRow> BuildFilteredRows()
+    {
+        IEnumerable<UserListRow> query = _allRows ?? new List<UserListRow>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.DisplayName, term) ||
+                ContainsIgnoreCase(x.EmailAddress, term) ||
+                ContainsIgnoreCase(x.TelephoneNumber, term) ||
+                ContainsIgnoreCase(x.Mobile, term) ||
+                ContainsIgnoreCase(x.Department, term) ||
+                ContainsIgnoreCase(x.Title, term) ||
+                ContainsIgnoreCase(x.AccountTypeName, term)
+            );
+        }
+
+        if (_selectedDepartment != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Department, _selectedDepartment));
+
+        if (_selectedTitle != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Title, _selectedTitle));
+
+        if (_selectedOperator == BoolTrue)
+            query = query.Where(x => x.IsOperator == true);
+        else if (_selectedOperator == BoolFalse)
+            query = query.Where(x => x.IsOperator != true);
+
+        if (_selectedActive == BoolTrue)
+            query = query.Where(x => x.IsActive == true);
+        else if (_selectedActive == BoolFalse)
+            query = query.Where(x => x.IsActive != true);
+
+        return query.ToList();
+    }
+
+    private static bool EqualsIgnoreCaseTrim(string? a, string b)
+        => string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetRowClass(UserListRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditUsers ? "users-row users-row-clickable" : "users-row";
+    }
+
+    private async Task OnRowClickAsync(DataGridRowClickEventArgs<UserListRow> args)
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        var id = args?.Item?.Id ?? 0;
+        if (id <= 0)
+            return;
+
+        if (!_canEditUsers)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return;
+        }
+
+        NavigateToEdit(id);
+        await Task.CompletedTask;
+    }
+
+    private async Task ExportVisibleToExcelAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canViewUsers)
+        {
+            Snackbar.Add(Txt("NoViewPermission", "Brak uprawnień do podglądu użytkowników."), Severity.Warning);
+            return;
+        }
+
+        var exportRows = GetExportRows();
+        if (exportRows.Count == 0)
+        {
+            Snackbar.Add(Txt("Msg_NoRecordsToExport", "Brak danych do eksportu."), Severity.Info);
+            return;
+        }
+
+        _isExporting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+            var fileName = "users_" + nowLocal.ToString("yyyyMMdd_HHmm") + ".xlsx";
+            var contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var bytes = BuildUsersXlsx(exportRows);
+
+            var module = await GetDownloadModuleAsync();
+            var base64 = Convert.ToBase64String(bytes);
+
+            await module.InvokeVoidAsync("downloadFileFromBase64", fileName, contentType, base64);
+
+            Snackbar.Add(Txt("Msg_ExportDone", "Eksport zakończony."), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Users] Export error.");
+            Snackbar.Add(Txt("Msg_ExportFailed", "Eksport nieudany. Spróbuj ponownie."), Severity.Error);
+        }
+        finally
+        {
+            _isExporting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<UserListRow> GetExportRows()
+    {
+        try
+        {
+            if (_grid?.FilteredItems != null)
+                return _grid.FilteredItems.Where(x => x != null).ToList();
+        }
+        catch
+        {
+        }
+
+        return (_filteredRows ?? new List<UserListRow>()).Where(x => x != null).ToList();
+    }
+
+    private byte[] BuildUsersXlsx(List<UserListRow> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Users");
+
+        var hName = Txt("Col.DisplayName", "Nazwa");
+        var hDept = Txt("Col.Department", "Dział");
+        var hTitle = Txt("Col.Title", "Stanowisko");
+        var hEmail = Txt("Col.Email", "E-mail");
+        var hPhone = Txt("Col.Phone", "Telefon");
+        var hMobile = Txt("Col.Mobile", "Komórka");
+        var hAccType = Txt("Col.AccountType", "Typ konta");
+        var hActive = Txt("Col.Active", "Aktywny");
+
+        ws.Cell(1, 1).Value = hName;
+        ws.Cell(1, 2).Value = hDept;
+        ws.Cell(1, 3).Value = hTitle;
+        ws.Cell(1, 4).Value = hEmail;
+        ws.Cell(1, 5).Value = hPhone;
+        ws.Cell(1, 6).Value = hMobile;
+        ws.Cell(1, 7).Value = hAccType;
+        ws.Cell(1, 8).Value = hActive;
+
+        var r = 2;
+        foreach (var x in rows)
+        {
+            ws.Cell(r, 1).Value = (x.DisplayName ?? string.Empty).Trim();
+            ws.Cell(r, 2).Value = (x.Department ?? string.Empty).Trim();
+            ws.Cell(r, 3).Value = (x.Title ?? string.Empty).Trim();
+            ws.Cell(r, 4).Value = (x.EmailAddress ?? string.Empty).Trim();
+            ws.Cell(r, 5).Value = (x.TelephoneNumber ?? string.Empty).Trim();
+            ws.Cell(r, 6).Value = (x.Mobile ?? string.Empty).Trim();
+            ws.Cell(r, 7).Value = (x.AccountTypeName ?? string.Empty).Trim();
+            ws.Cell(r, 8).Value = x.IsActive == true ? L["Yes"].Value : L["No"].Value;
+            r++;
+        }
+
+        var lastRow = Math.Max(2, r - 1);
+        var range = ws.Range(1, 1, lastRow, 8);
+
+        ws.SheetView.FreezeRows(1);
+        range.SetAutoFilter();
+        ws.Row(1).Style.Font.Bold = true;
+
+        ws.Columns(1, 8).AdjustToContents();
+
+        ws.Column(1).Width = Math.Min(ws.Column(1).Width, 35);
+        ws.Column(2).Width = Math.Min(ws.Column(2).Width, 40);
+        ws.Column(3).Width = Math.Min(ws.Column(3).Width, 40);
+        ws.Column(4).Width = Math.Min(ws.Column(4).Width, 45);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private async Task<IJSObjectReference> GetDownloadModuleAsync()
+    {
+        if (_downloadModule != null)
+            return _downloadModule;
+
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownload.js");
+        return _downloadModule;
+    }
+
+    private string Txt(string key, string fallback)
+    {
+        var s = L[key];
+        return s.ResourceNotFound ? fallback : s.Value;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_downloadModule != null)
+                await _downloadModule.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+}

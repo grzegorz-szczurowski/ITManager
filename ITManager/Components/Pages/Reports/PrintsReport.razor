@@ -1,0 +1,996 @@
+﻿@namespace ITManager.Components.Pages.Reports
+@page "/reports/prints"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Reports.View")]
+
+@* File: Components/Pages/Reports/PrintsReport.razor
+   Description: Raport wydruków (drukarki) z wyborem zakresu dat oraz dwoma kolumnami:
+                1) Lokalizacje (toggle vertical, multi-select)
+                2) Lista drukarek przefiltrowana wg dat i lokalizacji (0 selected = all)
+   Updated: 2026-01-25 - wersja 1.11:
+     - Security: page-level policy Authorize (Perm:Reports.View)
+     - RBAC: ctx.Has("Reports.View") + komunikat braku uprawnień
+     - i18n: IStringLocalizer + resx (PL/EN)
+     - UX: overlay w kontenerze jak Contacts/Systems
+     - TimeZone: domyślne daty liczone w strefie użytkownika (TimeZoneService + DateTime.UtcNow)
+     - Logging: ILogger zamiast Console
+   Updated: 2026-01-27 - wersja 1.13:
+     - FIX: pierwsze ładowanie raportu nie było wykonywane (ReloadAsync blokowane przez _loading podczas init)
+     - UX: zamiast mylącego "NoDataForFilters" podczas wolnego ładowania pokazujemy loader
+     - UX: nie zerujemy _result na starcie ReloadAsync, żeby nie migał komunikat "brak danych"
+     - i18n: doprecyzowanie namespace dla localizer (żeby resx były znajdowane)
+   Updated: 2026-01-27 - wersja 1.16:
+     - FIX: MudBlazor 8: MudCheckBox używa Value/ValueChanged (Checked jest legacy i nie aktualizował pola _compare).
+            Dodano OnCompareValueChanged(bool) i wymuszony ReloadAsync po zmianie.
+            Domyślnie Compare wyłączony.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using ITManager.Services.Auth
+@using TristoneHub.Models.Reports
+@using TristoneHub.Services.Reports
+
+@implements IAsyncDisposable
+
+@inject PrintsReportService PrintsReportService
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+@inject IStringLocalizer<PrintsReport> L
+@inject TimeZoneService TimeZoneService
+@inject ILogger<PrintsReport> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* HEADER *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Primary">
+                    @L["Subtitle"]
+                </MudText>
+            </MudStack>
+
+            <MudTooltip Text="@L["Refresh"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_loading || !_canView)" />
+            </MudTooltip>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoAccess", "Reports.View"] <b>Reports.View</b>
+            </MudAlert>
+        }
+        else
+        {
+            <div class="prints-content-container">
+
+                @* DATE RANGE *@
+                <MudPaper Class="pa-3" Outlined="true">
+                    <MudStack Spacing="2">
+
+                        <MudText Typo="Typo.subtitle2" Class="text-center">@L["DateRangeTitle"]</MudText>
+
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" md="6">
+
+                                <MudDatePicker Label="@L["From"]"
+                                               Date="_dateFrom"
+                                               DateChanged="OnDateFromChanged"
+                                               DateFormat="yyyy-MM-dd"
+                                               Variant="Variant.Outlined"
+                                               Margin="Margin.Dense"
+                                               Disabled="@_loading" />
+
+                                <MudSlider T="double"
+                                           Min="0"
+                                           Max="@_sliderMaxDays"
+                                           Step="1"
+                                           Value="_sliderFromDays"
+                                           ValueChanged="OnSliderFromChanged"
+                                           Immediate="true"
+                                           Disabled="@_loading" />
+                            </MudItem>
+
+                            <MudItem xs="12" md="6">
+
+                                <MudDatePicker Label="@L["To"]"
+                                               Date="_dateTo"
+                                               DateChanged="OnDateToChanged"
+                                               DateFormat="yyyy-MM-dd"
+                                               Variant="Variant.Outlined"
+                                               Margin="Margin.Dense"
+                                               Disabled="@_loading" />
+
+                                <MudSlider T="double"
+                                           Min="0"
+                                           Max="@_sliderMaxDays"
+                                           Step="1"
+                                           Value="_sliderToDays"
+                                           ValueChanged="OnSliderToChanged"
+                                           Immediate="true"
+                                           Disabled="@_loading" />
+                            </MudItem>
+                        </MudGrid>
+
+                    </MudStack>
+                </MudPaper>
+
+                @* COMPARE *@
+                <MudStack Spacing="1" AlignItems="AlignItems.Start">
+                    <MudCheckBox T="bool"
+                                 Value="_compare"
+                                 ValueChanged="OnCompareValueChanged"
+                                 Label="@L["CompareLabel"]"
+                                 Disabled="@_loading" />
+
+                    @if (_compare)
+                    {
+                        var p = GetComparePeriods();
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            @L["ComparePeriods",
+                            p.CurrentFrom.ToString("yyyy-MM-dd"),
+                                        p.CurrentTo.ToString("yyyy-MM-dd"),
+                                        p.PrevFrom.ToString("yyyy-MM-dd"),
+                                        p.PrevTo.ToString("yyyy-MM-dd")]
+                </MudText>
+                                }
+                </MudStack>
+
+                @* TWO COLUMNS *@
+                <MudGrid>
+
+                    <MudItem xs="12" md="4">
+                        <MudPaper Class="pa-3" Outlined="true">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["LocationsTitle"]</MudText>
+
+                                @if (_locations.Count == 0)
+                                {
+                                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                                        @L["NoLocations"]
+                                    </MudAlert>
+                                }
+                                else
+                                {
+                                    <MudStack Spacing="1">
+
+                                        @foreach (var loc in _locations)
+                                        {
+                                            var selected = _selectedLocationNames.Contains(loc.LocationName);
+                                            var labelStyle = selected ? "font-weight:700;" : "font-weight:400;";
+
+                                            <MudButton FullWidth="true"
+                                                       Variant="@(selected ? Variant.Filled : Variant.Outlined)"
+                                                       Color="Color.Primary"
+                                                       OnClick="@(() => ToggleLocation(loc.LocationName))"
+                                                       Disabled="@_loading"
+                                                       Style="justify-content:space-between; text-transform:none;">
+
+                                                <MudText Typo="Typo.body2" Style="@labelStyle">
+                                                    @loc.LocationName
+                                                </MudText>
+
+                                                <MudChip T="int"
+                                                         Value="@loc.PrintersCount"
+                                                         Variant="Variant.Outlined"
+                                                         Color="@(selected ? Color.Default : Color.Primary)"
+                                                         Size="Size.Small">
+                                                    @loc.PrintersCount
+                                                </MudChip>
+
+                                            </MudButton>
+                                        }
+
+                                    </MudStack>
+                                }
+                            </MudStack>
+                        </MudPaper>
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        <MudPaper Class="pa-3" Outlined="true">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["PrintersTitle"]</MudText>
+
+                                @if (_loading && _result is null)
+                                {
+                                    <MudStack Spacing="2" AlignItems="AlignItems.Center" Class="pa-4">
+                                        <MudProgressCircular Indeterminate="true" Size="Size.Medium" />
+                                        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Loading"]</MudText>
+                                    </MudStack>
+                                }
+                                else if (_result is null)
+                                {
+                                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                                        @L["NoDataForFilters"]
+                                    </MudAlert>
+                                }
+                                else
+                                {
+                                    <MudTable Items="PrinterTableRows"
+                                              Dense="true"
+                                              Hover="true"
+                                              Bordered="true"
+                                              Striped="true"
+                                              RowClick="OnPrinterRowClick"
+                                              RowClassFunc="@((row, index) => GetRowClass(row))"
+                                              Class="prints-table">
+
+                                        <HeaderContent>
+                                            <MudTh>@L["Col_Hostname"]</MudTh>
+                                            <MudTh>@L["Col_Model"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Total"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Mono"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Color"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Cost"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Trend"]</MudTh>
+                                        </HeaderContent>
+
+                                        <RowTemplate>
+                                            @if (context.IsSummary)
+                                            {
+                                                <MudTd>
+                                                    <MudText Typo="Typo.body2" Style="font-weight:700;">
+                                                        @context.Hostname
+                                                    </MudText>
+                                                </MudTd>
+
+                                                <MudTd></MudTd>
+
+                                                <MudTd class="text-right"><MudText Typo="Typo.body2" Style="font-weight:700;">@context.TotalPages</MudText></MudTd>
+                                                <MudTd class="text-right"><MudText Typo="Typo.body2" Style="font-weight:700;">@context.MonoPages</MudText></MudTd>
+                                                <MudTd class="text-right"><MudText Typo="Typo.body2" Style="font-weight:700;">@context.ColorPages</MudText></MudTd>
+
+                                                <MudTd class="text-right">
+                                                    <MudText Typo="Typo.body2" Style="font-weight:700;">
+                                                        @context.TotalCost.ToString("0.00") @L["CurrencyPLN"]
+                                                    </MudText>
+                                                </MudTd>
+
+                                                <MudTd class="text-right">
+                                                    @if (_compare)
+                                                    {
+                                                        var sumTrend = GetTrend(_result!.Kpis.TotalPages, _result!.Kpis.PrevTotalPages);
+                                                        <MudChip T="string" Variant="Variant.Outlined" Color="@sumTrend.Color" Size="Size.Small">
+                                                            <MudIcon Icon="@sumTrend.Icon" Size="Size.Small" Class="me-1" />
+                                                            @sumTrend.Label
+                                                        </MudChip>
+                                                    }
+                                                </MudTd>
+                                            }
+                                            else
+                                            {
+                                                <MudTd>@context.Hostname</MudTd>
+                                                <MudTd>@context.Model</MudTd>
+                                                <MudTd class="text-right">@context.TotalPages</MudTd>
+                                                <MudTd class="text-right">@context.MonoPages</MudTd>
+                                                <MudTd class="text-right">@context.ColorPages</MudTd>
+                                                <MudTd class="text-right">@context.TotalCost.ToString("0.00") @L["CurrencyPLN"]</MudTd>
+
+                                                <MudTd class="text-right">
+                                                    @if (_compare)
+                                                    {
+                                                        var prev = GetPrevPrinterRow(context.DeviceId);
+                                                        if (prev is not null)
+                                                        {
+                                                            var tr = GetTrend(context.TotalPages, prev.TotalPages);
+                                                            <MudChip T="string" Variant="Variant.Outlined" Color="@tr.Color" Size="Size.Small">
+                                                                <MudIcon Icon="@tr.Icon" Size="Size.Small" Class="me-1" />
+                                                                @tr.Label
+                                                            </MudChip>
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small">
+                                                                <MudIcon Icon="@Icons.Material.Filled.Remove" Size="Size.Small" Class="me-1" />
+                                                                @L["NA"]
+                                                            </MudChip>
+                                                        }
+                                                    }
+                                                </MudTd>
+                                            }
+                                        </RowTemplate>
+
+                                    </MudTable>
+                                }
+                            </MudStack>
+                        </MudPaper>
+                    </MudItem>
+
+                </MudGrid>
+
+                @* KPI *@
+                @if (_result is not null)
+                {
+                    var view = GetKpiView();
+                    var totalTrend = GetTrend(view.TotalPages, view.PrevTotalPages);
+                    var monoTrend = GetTrend(view.MonoPages, view.PrevMonoPages);
+                    var colorTrend = GetTrend(view.ColorPages, view.PrevColorPages);
+
+                    <MudStack Spacing="1" Class="mt-1">
+                        @if (_selectedPrinter is not null)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @L["SelectedPrinter", _selectedPrinter.Hostname, _selectedPrinter.Model]
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @L["AllPrinters"]
+                            </MudText>
+                        }
+                    </MudStack>
+
+                    <MudGrid>
+
+                        <MudItem xs="12" md="4">
+                            <MudPaper Class="pa-3" Outlined="true">
+
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_TotalPages"]</MudText>
+
+                                    @if (_compare)
+                                    {
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@totalTrend.Color" Size="Size.Small">
+                                            <MudIcon Icon="@totalTrend.Icon" Size="Size.Small" Class="me-1" />
+                                            @totalTrend.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+
+                                <MudText Typo="Typo.h4">@view.TotalPages</MudText>
+
+                                @if (_compare)
+                                {
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                        @L["PrevPeriodValue", view.PrevTotalPages]
+                                    </MudText>
+                                }
+
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="4">
+                            <MudPaper Class="pa-3" Outlined="true">
+
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_Mono"]</MudText>
+
+                                    @if (_compare)
+                                    {
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@monoTrend.Color" Size="Size.Small">
+                                            <MudIcon Icon="@monoTrend.Icon" Size="Size.Small" Class="me-1" />
+                                            @monoTrend.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+
+                                <MudText Typo="Typo.h4">@view.MonoPages</MudText>
+
+                                @if (_compare)
+                                {
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                        @L["PrevPeriodValue", view.PrevMonoPages]
+                                    </MudText>
+                                }
+
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="4">
+                            <MudPaper Class="pa-3" Outlined="true">
+
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_Color"]</MudText>
+
+                                    @if (_compare)
+                                    {
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@colorTrend.Color" Size="Size.Small">
+                                            <MudIcon Icon="@colorTrend.Icon" Size="Size.Small" Class="me-1" />
+                                            @colorTrend.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+
+                                <MudText Typo="Typo.h4">@view.ColorPages</MudText>
+
+                                @if (_compare)
+                                {
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                        @L["PrevPeriodValue", view.PrevColorPages]
+                                    </MudText>
+                                }
+
+                            </MudPaper>
+                        </MudItem>
+
+                    </MudGrid>
+                }
+
+                <MudOverlay Visible="@_loading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="prints-overlay">
+                    <MudPaper Class="pa-6 prints-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @L["Loading"]
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .prints-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .prints-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .prints-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .prints-summary-row td {
+        background: rgba(255,255,255,0.04);
+    }
+
+    .prints-selected-row td {
+        background: rgba(33,150,243,0.08);
+    }
+
+    .prints-table table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .prints-table th,
+    .prints-table td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private bool _ready;
+    private bool _canView;
+
+    private bool _loading;
+
+    private List<LocationButton> _locations = new();
+
+    // Multi-select: 0 selected => all locations (no filter)
+    private HashSet<string> _selectedLocationNames = new(StringComparer.OrdinalIgnoreCase);
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+
+    // Domyślnie odznaczony
+    private bool _compare = false;
+
+    private PrintsReportResult? _result;
+
+    private DateTime _sliderBaseStart;
+    private double _sliderMaxDays;
+
+    private double _sliderFromDays;
+    private double _sliderToDays;
+
+    private CancellationTokenSource? _reloadDebounceCts;
+    private bool _reloadRequestedWhileLoading;
+
+    private PrintsReportPrinterRow? _selectedPrinter;
+
+    private Dictionary<long, PrintsReportPrinterRow> _prevPrintersById = new();
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            _canView = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Reports.View");
+            _ready = true;
+
+            if (!_canView)
+                return;
+
+            try
+            {
+                _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+            }
+            catch
+            {
+                _userTz = TimeZoneInfo.Local;
+            }
+
+            await LoadLocationsAsync();
+
+            var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+            _sliderBaseStart = todayLocal.AddMonths(-12);
+            _sliderMaxDays = Math.Max(1, (todayLocal - _sliderBaseStart).TotalDays);
+
+            _dateFrom = todayLocal.AddDays(-30);
+            _dateTo = todayLocal;
+
+            SyncSlidersFromDates();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Reports.Prints] Init error.");
+            Snackbar.Add(L["ErrorReport"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (_canView)
+            await ReloadAsync();
+    }
+
+    private async Task OnCompareValueChanged(bool value)
+    {
+        if (_compare == value)
+            return;
+
+        _compare = value;
+
+        _selectedPrinter = null;
+        _prevPrintersById.Clear();
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_canView)
+            return;
+
+        if (_loading)
+        {
+            _reloadRequestedWhileLoading = true;
+            return;
+        }
+
+        try
+        {
+            _loading = true;
+
+            // Nie czyścimy _result na starcie, żeby UI nie pokazywał mylącego "NoDataForFilters"
+            // przy wolnym połączeniu. Overlay i loader przejmą komunikację.
+            _prevPrintersById.Clear();
+            _selectedPrinter = null;
+
+            var from = (_dateFrom?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date.AddDays(-30));
+            var to = (_dateTo?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date);
+
+            if (to < from)
+                (from, to) = (to, from);
+
+            var selectedLocations = _selectedLocationNames.Count == 0
+                ? new List<string>()
+                : _selectedLocationNames.ToList();
+
+            var req = new PrintsReportRequest
+            {
+                LocationNames = selectedLocations,
+                DateFrom = from,
+                DateTo = to,
+                CompareWithPreviousPeriod = _compare
+            };
+
+            var res = await PrintsReportService.GetReportAsync(req);
+
+            if (res?.Printers is null || res.Printers.Count == 0)
+            {
+                _result = null;
+                return;
+            }
+
+            _result = res;
+
+            if (_compare)
+            {
+                var p = GetComparePeriods();
+
+                var prevReq = new PrintsReportRequest
+                {
+                    LocationNames = selectedLocations,
+                    DateFrom = p.PrevFrom,
+                    DateTo = p.PrevTo,
+                    CompareWithPreviousPeriod = false
+                };
+
+                var prevRes = await PrintsReportService.GetReportAsync(prevReq);
+
+                _prevPrintersById = (prevRes?.Printers ?? new List<PrintsReportPrinterRow>())
+                    .GroupBy(x => x.DeviceId)
+                    .Select(g => g.First())
+                    .ToDictionary(x => x.DeviceId, x => x);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Reports.Prints] Reload error.");
+            Snackbar.Add(L["ErrorReport"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+
+            if (_reloadRequestedWhileLoading)
+            {
+                _reloadRequestedWhileLoading = false;
+                await ReloadAsync();
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadLocationsAsync()
+    {
+        try
+        {
+            _locations = await PrintsReportService.GetAvailableLocationsAsync();
+            _selectedLocationNames.Clear();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Reports.Prints] LoadLocations error.");
+            Snackbar.Add(L["ErrorLocations"], Severity.Error);
+        }
+    }
+
+    private async Task ScheduleReloadAsync(int delayMs = 450)
+    {
+        _reloadDebounceCts?.Cancel();
+        _reloadDebounceCts?.Dispose();
+
+        _reloadDebounceCts = new CancellationTokenSource();
+        var token = _reloadDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(delayMs, token);
+            if (!token.IsCancellationRequested)
+                await InvokeAsync(ReloadAsync);
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task OnDateFromChanged(DateTime? value)
+    {
+        _dateFrom = value;
+        NormalizeDates();
+        SyncSlidersFromDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnDateToChanged(DateTime? value)
+    {
+        _dateTo = value;
+        NormalizeDates();
+        SyncSlidersFromDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnSliderFromChanged(double value)
+    {
+        _sliderFromDays = value;
+
+        if (_sliderFromDays > _sliderToDays)
+            _sliderToDays = _sliderFromDays;
+
+        _dateFrom = _sliderBaseStart.AddDays(_sliderFromDays).Date;
+        _dateTo = _sliderBaseStart.AddDays(_sliderToDays).Date;
+
+        NormalizeDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnSliderToChanged(double value)
+    {
+        _sliderToDays = value;
+
+        if (_sliderToDays < _sliderFromDays)
+            _sliderFromDays = _sliderToDays;
+
+        _dateFrom = _sliderBaseStart.AddDays(_sliderFromDays).Date;
+        _dateTo = _sliderBaseStart.AddDays(_sliderToDays).Date;
+
+        NormalizeDates();
+        await ScheduleReloadAsync();
+    }
+
+    private void NormalizeDates()
+    {
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+        var from = (_dateFrom?.Date ?? todayLocal.AddDays(-30));
+        var to = (_dateTo?.Date ?? todayLocal);
+
+        if (to < from)
+            (from, to) = (to, from);
+
+        _dateFrom = from;
+        _dateTo = to;
+    }
+
+    private void SyncSlidersFromDates()
+    {
+        NormalizeDates();
+
+        var from = _dateFrom!.Value.Date;
+        var to = _dateTo!.Value.Date;
+
+        var start = (from - _sliderBaseStart).TotalDays;
+        var end = (to - _sliderBaseStart).TotalDays;
+
+        start = Math.Max(0, Math.Min(_sliderMaxDays, start));
+        end = Math.Max(0, Math.Min(_sliderMaxDays, end));
+
+        _sliderFromDays = start;
+        _sliderToDays = end;
+    }
+
+    private async Task ToggleLocation(string locationName)
+    {
+        if (string.IsNullOrWhiteSpace(locationName))
+            return;
+
+        if (_selectedLocationNames.Contains(locationName))
+            _selectedLocationNames.Remove(locationName);
+        else
+            _selectedLocationNames.Add(locationName);
+
+        await ScheduleReloadAsync(250);
+    }
+
+    private IEnumerable<PrinterTableRow> PrinterTableRows
+    {
+        get
+        {
+            if (_result?.Printers is null || _result.Printers.Count == 0)
+                return Enumerable.Empty<PrinterTableRow>();
+
+            var rows = _result.Printers
+                .OrderBy(x => x.Hostname ?? "", StringComparer.OrdinalIgnoreCase)
+                .Select(x => new PrinterTableRow
+                {
+                    IsSummary = false,
+                    DeviceId = x.DeviceId,
+                    Hostname = x.Hostname ?? "",
+                    Model = x.Model ?? "",
+                    TotalPages = x.TotalPages,
+                    MonoPages = x.MonoPages,
+                    ColorPages = x.ColorPages,
+                    TotalCost = x.TotalCost
+                })
+                .ToList();
+
+            rows.Add(new PrinterTableRow
+            {
+                IsSummary = true,
+                DeviceId = -1,
+                Hostname = L["SummaryRow"],
+                Model = "",
+                TotalPages = TotalPagesSum,
+                MonoPages = MonoPagesSum,
+                ColorPages = ColorPagesSum,
+                TotalCost = TotalCostSum
+            });
+
+            return rows;
+        }
+    }
+
+    private int TotalPagesSum => _result?.Printers?.Sum(x => x.TotalPages) ?? 0;
+    private int MonoPagesSum => _result?.Printers?.Sum(x => x.MonoPages) ?? 0;
+    private int ColorPagesSum => _result?.Printers?.Sum(x => x.ColorPages) ?? 0;
+    private decimal TotalCostSum => _result?.Printers?.Sum(x => x.TotalCost) ?? 0m;
+
+    private string GetRowClass(PrinterTableRow row)
+    {
+        if (row.IsSummary)
+            return "prints-summary-row";
+
+        if (_selectedPrinter is not null && row.DeviceId == _selectedPrinter.DeviceId)
+            return "prints-selected-row";
+
+        return string.Empty;
+    }
+
+    private void OnPrinterRowClick(TableRowClickEventArgs<PrinterTableRow> args)
+    {
+        if (args?.Item is null)
+            return;
+
+        if (args.Item.IsSummary)
+        {
+            _selectedPrinter = null;
+            StateHasChanged();
+            return;
+        }
+
+        var printer = _result?.Printers?.FirstOrDefault(x => x.DeviceId == args.Item.DeviceId);
+        _selectedPrinter = printer;
+        StateHasChanged();
+    }
+
+    private PrintsReportPrinterRow? GetPrevPrinterRow(long deviceId)
+    {
+        if (deviceId <= 0)
+            return null;
+
+        return _prevPrintersById.TryGetValue(deviceId, out var prev) ? prev : null;
+    }
+
+    private TrendChip GetTrend(int current, int prev)
+    {
+        if (!_compare)
+            return new TrendChip(Icons.Material.Filled.Remove, Color.Primary, "0%");
+
+        if (prev == 0 && current == 0)
+            return new TrendChip(Icons.Material.Filled.Remove, Color.Primary, "0%");
+
+        if (prev == 0 && current > 0)
+            return new TrendChip(Icons.Material.Filled.ArrowUpward, Color.Error, L["InfinityLabel"]);
+
+        var diff = current - prev;
+
+        if (diff == 0)
+            return new TrendChip(Icons.Material.Filled.Remove, Color.Primary, "0%");
+
+        var pct = (double)diff / prev * 100.0;
+        var label = $"{(pct > 0 ? "+" : "")}{pct:0.#}%";
+
+        if (diff > 0)
+            return new TrendChip(Icons.Material.Filled.ArrowUpward, Color.Error, label);
+
+        return new TrendChip(Icons.Material.Filled.ArrowDownward, Color.Success, label);
+    }
+
+    private ComparePeriods GetComparePeriods()
+    {
+        NormalizeDates();
+
+        var currentFrom = (_dateFrom?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date.AddDays(-30));
+        var currentTo = (_dateTo?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date);
+
+        if (currentTo < currentFrom)
+            (currentFrom, currentTo) = (currentTo, currentFrom);
+
+        var days = (currentTo - currentFrom).Days + 1;
+
+        var prevTo = currentFrom.AddDays(-1);
+        var prevFrom = prevTo.AddDays(-(days - 1));
+
+        return new ComparePeriods(currentFrom, currentTo, prevFrom, prevTo);
+    }
+
+    private KpiView GetKpiView()
+    {
+        if (_selectedPrinter is not null)
+        {
+            var prev = GetPrevPrinterRow(_selectedPrinter.DeviceId);
+
+            return new KpiView
+            {
+                TotalPages = _selectedPrinter.TotalPages,
+                MonoPages = _selectedPrinter.MonoPages,
+                ColorPages = _selectedPrinter.ColorPages,
+
+                PrevTotalPages = prev?.TotalPages ?? 0,
+                PrevMonoPages = prev?.MonoPages ?? 0,
+                PrevColorPages = prev?.ColorPages ?? 0
+            };
+        }
+
+        return new KpiView
+        {
+            TotalPages = _result!.Kpis.TotalPages,
+            MonoPages = _result!.Kpis.MonoPages,
+            ColorPages = _result!.Kpis.ColorPages,
+
+            PrevTotalPages = _result!.Kpis.PrevTotalPages,
+            PrevMonoPages = _result!.Kpis.PrevMonoPages,
+            PrevColorPages = _result!.Kpis.PrevColorPages
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_reloadDebounceCts is not null)
+            {
+                _reloadDebounceCts.Cancel();
+                _reloadDebounceCts.Dispose();
+            }
+        }
+        catch
+        {
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private sealed record ComparePeriods(DateTime CurrentFrom, DateTime CurrentTo, DateTime PrevFrom, DateTime PrevTo);
+    private sealed record TrendChip(string Icon, Color Color, string Label);
+
+    private sealed class PrinterTableRow
+    {
+        public bool IsSummary { get; set; }
+        public long DeviceId { get; set; }
+        public string Hostname { get; set; } = "";
+        public string Model { get; set; } = "";
+        public int TotalPages { get; set; }
+        public int MonoPages { get; set; }
+        public int ColorPages { get; set; }
+        public decimal TotalCost { get; set; }
+    }
+
+    private sealed class KpiView
+    {
+        public int TotalPages { get; set; }
+        public int MonoPages { get; set; }
+        public int ColorPages { get; set; }
+
+        public int PrevTotalPages { get; set; }
+        public int PrevMonoPages { get; set; }
+        public int PrevColorPages { get; set; }
+    }
+}

@@ -1,0 +1,2293 @@
+﻿@page "/dashboard"
+
+@* File: Components/Pages/Dashboard.razor
+   Description: Dashboard: tickety (dbo.tickets + dbo.ticket_actions + dbo.ticket_statuses) + drukarki (dbo.counter_printers) + backup health + assets.
+                Localized via IStringLocalizer<Dashboard> (PL/EN resx).
+   Version: 1.61
+   Notes:
+   - Tickets:
+     - dbo.tickets: źródło listy ticketów + data utworzenia + aktualny status (ticket_status_id)
+     - dbo.ticket_actions: tylko do last_action_date (Top stale)
+     - dbo.ticket_statuses: mapowanie id -> name
+   - UI: 5 ticket KPI w jednym rzędzie (desktop) + Top 4 po 2 na rząd
+   - FIX (1.61): status nie jest wymagany w dbo.ticket_actions (u Ciebie status jest w dbo.tickets)
+*@
+
+@using System
+@using System.Data
+@using System.Data.SqlClient
+@using System.Threading
+@using System.Threading.Tasks
+@using System.Collections.Generic
+@using System.Linq
+@using MudBlazor
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Configuration
+@using Microsoft.AspNetCore.Authorization
+
+@inject IConfiguration Configuration
+@inject NavigationManager NavigationManager
+@inject IStringLocalizer<Dashboard> L
+
+<style>
+    .printer-kpi-card {
+        height: 132px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .printer-kpi-subline {
+        margin-top: 2px;
+        opacity: 0.9;
+        min-height: 18px;
+    }
+
+    .ticket-kpi-card {
+        height: 132px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .ticket-kpi-subline {
+        margin-top: 2px;
+        opacity: 0.9;
+        min-height: 18px;
+    }
+
+    .ticket-top-card {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ticket-top-card-body {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ticket-top-table-wrap {
+        overflow: visible;
+    }
+
+    .clickable-row {
+        cursor: pointer;
+    }
+
+    .asset-kpi-card {
+        height: 132px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .asset-chart-wrap {
+        height: 260px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .dashboard-loading-overlay {
+        position: relative;
+        min-height: 520px;
+    }
+
+    .dashboard-loading-content {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+    }
+
+    /* Tickets KPI: 5 w rzędzie na desktopie */
+    .tickets-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    @@media (min-width: 600px) {
+        .tickets-kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @@media (min-width: 960px) {
+        .tickets-kpi-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+    }
+</style>
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="3">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Spacing="0">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudText Typo="Typo.h5">@T("DashboardTitle", "Dashboard")</MudText>
+
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Primary"
+                                   Disabled="_isLoading"
+                                   OnClick="ReloadAsync"
+                                   Title="@T("Refresh", "Refresh")"
+                                   AriaLabel="@T("Refresh", "Refresh")" />
+                </MudStack>
+
+                <MudText Typo="Typo.subtitle2">@T("DashboardSubtitle", "Overview")</MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@_errorMessage</MudAlert>
+        }
+
+        <div class="dashboard-loading-overlay">
+
+            <MudOverlay Visible="_isLoading"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Absolute="true">
+                <div class="dashboard-loading-content">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                    <MudText Typo="Typo.subtitle2">@T("LoadingData", "Loading data")</MudText>
+                </div>
+            </MudOverlay>
+
+            @if (!_isLoading)
+            {
+                <MudGrid GutterSize="GutterSize.Small">
+
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.h6">@T("Tickets", "Tickets")</MudText>
+                    </MudItem>
+
+                    @if (!_ticketsSchemaReady)
+                    {
+                        <MudItem xs="12">
+                            <MudAlert Severity="Severity.Warning" Dense="true">
+                                @(!string.IsNullOrWhiteSpace(_ticketsSchemaDiagnostic)
+                                                        ? _ticketsSchemaDiagnostic
+                                                        : T("TicketsSchemaMissing", "Tickets: missing required tables/columns (dbo.tickets + dbo.ticket_actions + dbo.ticket_statuses)."))
+                    </MudAlert>
+                </MudItem>
+                                }
+                    else
+                    {
+                        <MudItem xs="12">
+                            <div class="tickets-kpi-grid">
+
+                                <MudCard Class="pa-4 ticket-kpi-card">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@T("TicketsOpened30", "Opened (30d)")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudText Typo="Typo.h3">@Fmt(_ticketsOpened30)</MudText>
+                                            @TrendChip(_ticketsOpened30ChangePct, T("TrendTicketsOpened30Tooltip", "Compared to previous 30d"))
+                                        </MudStack>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="ticket-kpi-subline">
+                                        @T("TicketsOpened30Hint", "Created based on ticket creation date")
+                                    </MudText>
+                                </MudCard>
+
+                                <MudCard Class="pa-4 ticket-kpi-card">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@T("TicketsClosed30", "Closed (30d)")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudText Typo="Typo.h3">@Fmt(_ticketsClosed30)</MudText>
+                                            @TrendChip(_ticketsClosed30ChangePct, T("TrendTicketsClosed30Tooltip", "Compared to previous 30d"))
+                                        </MudStack>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="ticket-kpi-subline">
+                                        @T("TicketsClosed30Hint", "Counted using ticket closing date and current status")
+                                    </MudText>
+                                </MudCard>
+
+                                <MudCard Class="pa-4 ticket-kpi-card">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@T("TicketsQueue", "Queue")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudText Typo="Typo.h3">@Fmt(_ticketsQueue)</MudText>
+                                            @TrendChip(_ticketsQueueChangePct, T("TrendTicketsQueueTooltip", "Tickets moved to Queue in last 30d vs previous 30d"))
+                                        </MudStack>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="ticket-kpi-subline">
+                                        @T("TicketsQueueHint", "New and Assigned")
+                                    </MudText>
+                                </MudCard>
+
+                                <MudCard Class="pa-4 ticket-kpi-card">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@T("TicketsInProgress", "In progress")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudText Typo="Typo.h3">@Fmt(_ticketsInProgress)</MudText>
+                                            @TrendChip(_ticketsInProgressChangePct, T("TrendTicketsInProgressTooltip", "Tickets moved to In progress in last 30d vs previous 30d"))
+                                        </MudStack>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="ticket-kpi-subline">
+                                        @T("TicketsInProgressHint", "Currently being handled")
+                                    </MudText>
+                                </MudCard>
+
+                                <MudCard Class="pa-4 ticket-kpi-card">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2">@T("TicketsWaiting", "Waiting")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudText Typo="Typo.h3">@Fmt(_ticketsWaiting)</MudText>
+                                            @TrendChip(_ticketsWaitingChangePct, T("TrendTicketsWaitingTooltip", "Tickets moved to Waiting in last 30d vs previous 30d"))
+                                        </MudStack>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="ticket-kpi-subline">
+                                        @T("TicketsWaitingHint", "On hold / waiting")
+                                    </MudText>
+                                </MudCard>
+
+                            </div>
+                        </MudItem>
+
+                        <MudItem xs="12">
+                            <MudGrid GutterSize="GutterSize.Small">
+
+                                <MudItem xs="12" md="6">
+                                    <MudCard Class="pa-4 ticket-top-card">
+                                        <MudText Typo="Typo.subtitle2">@T("TopOldestActiveTicketsTitle", "Top oldest active tickets")</MudText>
+
+                                        <div class="ticket-top-card-body">
+                                            @if (_topOldestActiveTickets.Count == 0)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                            }
+                                            else
+                                            {
+                                                <div class="ticket-top-table-wrap">
+                                                    <MudTable Items="_topOldestActiveTickets"
+                                                              Dense="true"
+                                                              Hover="true"
+                                                              Elevation="0"
+                                                              Class="mt-2"
+                                                              RowClassFunc="@(new Func<TicketListRow, int, string>((row, index) => "clickable-row"))"
+                                                              RowClick="OnTicketRowClick">
+                                                        <HeaderContent>
+                                                            <MudTh>@T("TableId", "ID")</MudTh>
+                                                            <MudTh>@T("TableTitle", "Title")</MudTh>
+                                                            <MudTh>@T("TableStatus", "Status")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TablePriority", "Priority")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TableAge", "Age")</MudTh>
+                                                        </HeaderContent>
+                                                        <RowTemplate>
+                                                            <MudTd DataLabel="@T("TableId", "ID")">@context.Id</MudTd>
+                                                            <MudTd DataLabel="@T("TableTitle", "Title")">@context.Title</MudTd>
+                                                            <MudTd DataLabel="@T("TableStatus", "Status")">@context.Status</MudTd>
+                                                            <MudTd DataLabel="@T("TablePriority", "Priority")" Style="text-align:right;">
+                                                                @PriorityChip(context)
+                                                            </MudTd>
+                                                            <MudTd DataLabel="@T("TableAge", "Age")" Style="text-align:right;">@context.AgeDays</MudTd>
+                                                        </RowTemplate>
+                                                    </MudTable>
+                                                </div>
+
+                                                <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                                    <MudButton Variant="Variant.Text"
+                                                               Color="Color.Primary"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => NavigationManager.NavigateTo("/tickets"))">
+                                                        @T("ShowMore", "Show more")
+                                                    </MudButton>
+                                                </MudStack>
+                                            }
+                                        </div>
+                                    </MudCard>
+                                </MudItem>
+
+                                <MudItem xs="12" md="6">
+                                    <MudCard Class="pa-4 ticket-top-card">
+                                        <MudText Typo="Typo.subtitle2">@T("TopStaleActiveTicketsTitle", "Top stale active tickets")</MudText>
+
+                                        <div class="ticket-top-card-body">
+                                            @if (_topStaleActiveTickets.Count == 0)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                            }
+                                            else
+                                            {
+                                                <div class="ticket-top-table-wrap">
+                                                    <MudTable Items="_topStaleActiveTickets"
+                                                              Dense="true"
+                                                              Hover="true"
+                                                              Elevation="0"
+                                                              Class="mt-2"
+                                                              RowClassFunc="@(new Func<TicketListRow, int, string>((row, index) => "clickable-row"))"
+                                                              RowClick="OnTicketRowClick">
+                                                        <HeaderContent>
+                                                            <MudTh>@T("TableId", "ID")</MudTh>
+                                                            <MudTh>@T("TableTitle", "Title")</MudTh>
+                                                            <MudTh>@T("TableStatus", "Status")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TablePriority", "Priority")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TableLastActionAge", "Last action age")</MudTh>
+                                                        </HeaderContent>
+                                                        <RowTemplate>
+                                                            <MudTd DataLabel="@T("TableId", "ID")">@context.Id</MudTd>
+                                                            <MudTd DataLabel="@T("TableTitle", "Title")">@context.Title</MudTd>
+                                                            <MudTd DataLabel="@T("TableStatus", "Status")">@context.Status</MudTd>
+                                                            <MudTd DataLabel="@T("TablePriority", "Priority")" Style="text-align:right;">
+                                                                @PriorityChip(context)
+                                                            </MudTd>
+                                                            <MudTd DataLabel="@T("TableLastActionAge", "Last action age")" Style="text-align:right;">@context.LastActionAgeDays</MudTd>
+                                                        </RowTemplate>
+                                                    </MudTable>
+                                                </div>
+
+                                                <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                                    <MudButton Variant="Variant.Text"
+                                                               Color="Color.Primary"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => NavigationManager.NavigateTo("/tickets"))">
+                                                        @T("ShowMore", "Show more")
+                                                    </MudButton>
+                                                </MudStack>
+                                            }
+                                        </div>
+                                    </MudCard>
+                                </MudItem>
+
+                                <MudItem xs="12" md="6">
+                                    <MudCard Class="pa-4 ticket-top-card">
+                                        <MudText Typo="Typo.subtitle2">@T("TopOldestWaitingTicketsTitle", "Top oldest waiting tickets")</MudText>
+
+                                        <div class="ticket-top-card-body">
+                                            @if (_topOldestWaitingTickets.Count == 0)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                            }
+                                            else
+                                            {
+                                                <div class="ticket-top-table-wrap">
+                                                    <MudTable Items="_topOldestWaitingTickets"
+                                                              Dense="true"
+                                                              Hover="true"
+                                                              Elevation="0"
+                                                              Class="mt-2"
+                                                              RowClassFunc="@(new Func<TicketListRow, int, string>((row, index) => "clickable-row"))"
+                                                              RowClick="OnTicketRowClick">
+                                                        <HeaderContent>
+                                                            <MudTh>@T("TableId", "ID")</MudTh>
+                                                            <MudTh>@T("TableTitle", "Title")</MudTh>
+                                                            <MudTh>@T("TableStatus", "Status")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TablePriority", "Priority")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TableAge", "Age")</MudTh>
+                                                        </HeaderContent>
+                                                        <RowTemplate>
+                                                            <MudTd DataLabel="@T("TableId", "ID")">@context.Id</MudTd>
+                                                            <MudTd DataLabel="@T("TableTitle", "Title")">@context.Title</MudTd>
+                                                            <MudTd DataLabel="@T("TableStatus", "Status")">@context.Status</MudTd>
+                                                            <MudTd DataLabel="@T("TablePriority", "Priority")" Style="text-align:right;">
+                                                                @PriorityChip(context)
+                                                            </MudTd>
+                                                            <MudTd DataLabel="@T("TableAge", "Age")" Style="text-align:right;">@context.AgeDays</MudTd>
+                                                        </RowTemplate>
+                                                    </MudTable>
+                                                </div>
+
+                                                <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                                    <MudButton Variant="Variant.Text"
+                                                               Color="Color.Primary"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => NavigationManager.NavigateTo("/tickets"))">
+                                                        @T("ShowMore", "Show more")
+                                                    </MudButton>
+                                                </MudStack>
+                                            }
+                                        </div>
+                                    </MudCard>
+                                </MudItem>
+
+                                <MudItem xs="12" md="6">
+                                    <MudCard Class="pa-4 ticket-top-card">
+                                        <MudText Typo="Typo.subtitle2">@T("TopStaleWaitingTicketsTitle", "Top stale waiting tickets")</MudText>
+
+                                        <div class="ticket-top-card-body">
+                                            @if (_topStaleWaitingTickets.Count == 0)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                            }
+                                            else
+                                            {
+                                                <div class="ticket-top-table-wrap">
+                                                    <MudTable Items="_topStaleWaitingTickets"
+                                                              Dense="true"
+                                                              Hover="true"
+                                                              Elevation="0"
+                                                              Class="mt-2"
+                                                              RowClassFunc="@(new Func<TicketListRow, int, string>((row, index) => "clickable-row"))"
+                                                              RowClick="OnTicketRowClick">
+                                                        <HeaderContent>
+                                                            <MudTh>@T("TableId", "ID")</MudTh>
+                                                            <MudTh>@T("TableTitle", "Title")</MudTh>
+                                                            <MudTh>@T("TableStatus", "Status")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TablePriority", "Priority")</MudTh>
+                                                            <MudTh Style="text-align:right;">@T("TableLastActionAge", "Last action age")</MudTh>
+                                                        </HeaderContent>
+                                                        <RowTemplate>
+                                                            <MudTd DataLabel="@T("TableId", "ID")">@context.Id</MudTd>
+                                                            <MudTd DataLabel="@T("TableTitle", "Title")">@context.Title</MudTd>
+                                                            <MudTd DataLabel="@T("TableStatus", "Status")">@context.Status</MudTd>
+                                                            <MudTd DataLabel="@T("TablePriority", "Priority")" Style="text-align:right;">
+                                                                @PriorityChip(context)
+                                                            </MudTd>
+                                                            <MudTd DataLabel="@T("TableLastActionAge", "Last action age")" Style="text-align:right;">@context.LastActionAgeDays</MudTd>
+                                                        </RowTemplate>
+                                                    </MudTable>
+                                                </div>
+
+                                                <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                                    <MudButton Variant="Variant.Text"
+                                                               Color="Color.Primary"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => NavigationManager.NavigateTo("/tickets"))">
+                                                        @T("ShowMore", "Show more")
+                                                    </MudButton>
+                                                </MudStack>
+                                            }
+                                        </div>
+                                    </MudCard>
+                                </MudItem>
+
+                            </MudGrid>
+                        </MudItem>
+                    }
+
+                    <MudItem xs="12">
+                        <MudDivider Class="my-2" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.h6">@T("Licenses", "Licenses")</MudText>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudCard Class="pa-4 ticket-top-card">
+                            <MudText Typo="Typo.subtitle2">@T("TopExpiringLicensesTitle", "Top expiring licenses")</MudText>
+
+                            <div class="ticket-top-card-body">
+                                @if (_topExpiringLicenses.Count == 0)
+                                {
+                                    <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                }
+                                else
+                                {
+                                    <div class="ticket-top-table-wrap">
+                                        <MudTable Items="_topExpiringLicenses"
+                                                  Dense="true"
+                                                  Hover="true"
+                                                  Elevation="0"
+                                                  Class="mt-2">
+                                            <HeaderContent>
+                                                <MudTh>@T("TableLicense", "License")</MudTh>
+                                                <MudTh>@T("TableType", "Type")</MudTh>
+                                                <MudTh>@T("TableProducer", "Producer")</MudTh>
+                                                <MudTh>@T("TableUser", "User")</MudTh>
+                                                <MudTh Style="text-align:right;">@T("TableDaysLeft", "Days left")</MudTh>
+                                                <MudTh>@T("TableStatus", "Status")</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd DataLabel="@T("TableLicense", "License")">@context.LicenseName</MudTd>
+                                                <MudTd DataLabel="@T("TableType", "Type")">@context.TypeName</MudTd>
+                                                <MudTd DataLabel="@T("TableProducer", "Producer")">@context.ProducerName</MudTd>
+                                                <MudTd DataLabel="@T("TableUser", "User")">@context.UserDisplayName</MudTd>
+                                                <MudTd DataLabel="@T("TableDaysLeft", "Days left")" Style="text-align:right;">@context.DaysLeftText</MudTd>
+                                                <MudTd DataLabel="@T("TableStatus", "Status")">@context.StatusName</MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+                                    </div>
+
+                                    <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                        <MudButton Variant="Variant.Text"
+                                                   Color="Color.Primary"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => NavigationManager.NavigateTo("/assets/licenses"))">
+                                            @T("ShowMore", "Show more")
+                                        </MudButton>
+                                    </MudStack>
+                                }
+                            </div>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudCard Class="pa-4 ticket-top-card">
+                            <MudText Typo="Typo.subtitle2">@T("TopUnusedLicensesTitle", "Top unused licenses")</MudText>
+
+                            <div class="ticket-top-card-body">
+                                @if (_topUnusedLicenses.Count == 0)
+                                {
+                                    <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                                }
+                                else
+                                {
+                                    <div class="ticket-top-table-wrap">
+                                        <MudTable Items="_topUnusedLicenses"
+                                                  Dense="true"
+                                                  Hover="true"
+                                                  Elevation="0"
+                                                  Class="mt-2">
+                                            <HeaderContent>
+                                                <MudTh>@T("TableLicense", "License")</MudTh>
+                                                <MudTh>@T("TableType", "Type")</MudTh>
+                                                <MudTh>@T("TableProducer", "Producer")</MudTh>
+                                                <MudTh>@T("TableInventoryNo", "Inventory no")</MudTh>
+                                                <MudTh>@T("TableStatus", "Status")</MudTh>
+                                                <MudTh Style="text-align:right;">@T("TableSubscription", "Subscription")</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd DataLabel="@T("TableLicense", "License")">@context.LicenseName</MudTd>
+                                                <MudTd DataLabel="@T("TableType", "Type")">@context.TypeName</MudTd>
+                                                <MudTd DataLabel="@T("TableProducer", "Producer")">@context.ProducerName</MudTd>
+                                                <MudTd DataLabel="@T("TableInventoryNo", "Inventory no")">@context.InventoryNo</MudTd>
+                                                <MudTd DataLabel="@T("TableStatus", "Status")">@context.StatusName</MudTd>
+                                                <MudTd DataLabel="@T("TableSubscription", "Subscription")" Style="text-align:right;">@context.SubscriptionText</MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+                                    </div>
+
+                                    <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                                        <MudButton Variant="Variant.Text"
+                                                   Color="Color.Primary"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => NavigationManager.NavigateTo("/assets/licenses"))">
+                                            @T("ShowMore", "Show more")
+                                        </MudButton>
+                                    </MudStack>
+                                }
+                            </div>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudDivider Class="my-2" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.h6">@T("Assets", "Assets")</MudText>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 asset-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@T("Devices", "Devices")</MudText>
+                                <MudText Typo="Typo.h3">@Fmt(_devicesTotal)</MudText>
+                            </div>
+
+                            <MudText Typo="Typo.caption" Style="opacity:0.9;">
+                                @T("DevicesHint", "Total devices")
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="9">
+                        <MudCard Class="pa-4">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                <MudText Typo="Typo.subtitle2">@T("DeviceTypeStructureTitle", "Device type structure")</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity:0.9;">
+                                    @T("DeviceTypeStructureSourceHint", "Source: devices")
+                                </MudText>
+                            </MudStack>
+
+                            @if (_assetTypeBreakdown.Count == 0)
+                            {
+                                <div class="asset-chart-wrap">
+                                    <MudText Typo="Typo.caption">@T("NoData", "No data")</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <MudGrid GutterSize="GutterSize.Small" Class="mt-2">
+                                    <MudItem xs="12" md="6">
+                                        <div class="asset-chart-wrap">
+                                            <MudChart ChartType="ChartType.Pie"
+                                                      InputData="@_assetTypeChartData"
+                                                      InputLabels="@_assetTypeChartLabels"
+                                                      Width="100%"
+                                                      Height="260px" />
+                                        </div>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTable Items="_assetTypeBreakdown"
+                                                  Dense="true"
+                                                  Hover="true"
+                                                  Elevation="0">
+                                            <HeaderContent>
+                                                <MudTh>@T("TableType", "Type")</MudTh>
+                                                <MudTh Style="text-align:right;">@T("TableCountShort", "Count")</MudTh>
+                                                <MudTh Style="text-align:right;">@T("TableShare", "Share")</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd>@context.TypeName</MudTd>
+                                                <MudTd Style="text-align:right;">@context.Count.ToString("N0")</MudTd>
+                                                <MudTd Style="text-align:right;">@context.PercentText</MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+                                    </MudItem>
+                                </MudGrid>
+                            }
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudDivider Class="my-2" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.h6">@T("Backups", "Backups")</MudText>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 ticket-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@T("BackupOK", "Backup OK")</MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_backupOk)</MudText>
+                                    @BackupStateChip("OK")
+                                </MudStack>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="ticket-kpi-subline">@T("BackupOkHint", "Healthy")</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 ticket-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@T("BackupWarning", "Backup Warning")</MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_backupWarning)</MudText>
+                                    @BackupStateChip("Warning")
+                                </MudStack>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="ticket-kpi-subline">@T("BackupWarningHint", "Needs attention")</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 ticket-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@T("BackupFailed", "Backup Failed")</MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_backupFailed)</MudText>
+                                    @BackupStateChip("Failed")
+                                </MudStack>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="ticket-kpi-subline">@T("BackupFailedHint", "Failure")</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 ticket-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@T("BackupDisabled", "Backup Disabled")</MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_backupDisabled)</MudText>
+                                    @BackupStateChip("Disabled")
+                                </MudStack>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="ticket-kpi-subline">@T("BackupDisabledHint", "Disabled")</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudCard Class="pa-4">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                <MudText Typo="Typo.subtitle2">@T("TopBackupIssuesTitle", "Top backup issues")</MudText>
+                                <MudText Typo="Typo.caption" Style="opacity:0.9;">@T("BackupSourceHint", "Source: vw_backup_health")</MudText>
+                            </MudStack>
+
+                            @if (_backupIssues.Count == 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                            }
+                            else
+                            {
+                                <MudTable Items="_backupIssues"
+                                          Dense="true"
+                                          Hover="true"
+                                          Elevation="0"
+                                          Class="mt-2">
+                                    <HeaderContent>
+                                        <MudTh>@T("TableSystem", "System")</MudTh>
+                                        <MudTh>@T("TableFrequency", "Frequency")</MudTh>
+                                        <MudTh>@T("TableLastStatus", "Last status")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableAge", "Age")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableLastBackup", "Last backup")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableState", "State")</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>@context.SystemName</MudTd>
+                                        <MudTd>@context.FrequencyName</MudTd>
+                                        <MudTd>@context.LastStatusName</MudTd>
+                                        <MudTd Style="text-align:right;">@context.AgeText</MudTd>
+                                        <MudTd Style="text-align:right;">@context.LastBackupDateText</MudTd>
+                                        <MudTd Style="text-align:right;">
+                                            @BackupStateChip(context.HealthState)
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudDivider Class="my-2" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.h6">@T("Printers", "Printers")</MudText>
+
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudText Typo="Typo.caption">@string.Format(T("RangeDaysFormat", "Last {0} days"), _printerDays)</MudText>
+                                <MudSlider T="int"
+                                           Min="7"
+                                           Max="180"
+                                           Step="1"
+                                           Immediate="true"
+                                           Value="_printerDays"
+                                           ValueChanged="OnPrinterDaysChanged"
+                                           Style="width:260px;" />
+                            </MudStack>
+                        </MudStack>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 printer-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@string.Format(T("PrinterPagesTitleFormat", "Pages ({0}d)"), _printerDays)</MudText>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_printerPagesInRange)</MudText>
+                                    @TrendChip(_printerPagesChangePct, T("TrendPrintersVsPrevious", "Compared to previous range"))
+                                </MudStack>
+                            </div>
+
+                            <MudText Typo="Typo.caption" Class="printer-kpi-subline">
+                                @FmtMoneyPln(_printerTotalCostInRange)
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 printer-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@string.Format(T("PrinterColorTitleFormat", "Color ({0}d)"), _printerDays)</MudText>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_printerColorPagesInRange)</MudText>
+                                    @TrendChip(_printerColorPagesChangePct, T("TrendPrintersVsPrevious", "Compared to previous range"))
+                                </MudStack>
+                            </div>
+
+                            <MudText Typo="Typo.caption" Class="printer-kpi-subline">
+                                @FmtMoneyPln(_printerColorCostInRange)
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 printer-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@string.Format(T("PrinterMonoTitleFormat", "Mono ({0}d)"), _printerDays)</MudText>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@Fmt(_printerMonoPagesInRange)</MudText>
+                                    @TrendChip(_printerMonoPagesChangePct, T("TrendPrintersVsPrevious", "Compared to previous range"))
+                                </MudStack>
+                            </div>
+
+                            <MudText Typo="Typo.caption" Class="printer-kpi-subline">
+                                @FmtMoneyPln(_printerMonoCostInRange)
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudCard Class="pa-4 printer-kpi-card">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">@string.Format(T("PrinterCostTitleFormat", "Cost ({0}d)"), _printerDays)</MudText>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudText Typo="Typo.h3">@FmtMoneyPln(_printerTotalCostInRange)</MudText>
+                                    @TrendChip(_printerCostChangePct, T("TrendPrintersVsPrevious", "Compared to previous range"))
+                                </MudStack>
+                            </div>
+
+                            <MudText Typo="Typo.caption" Class="printer-kpi-subline">
+                                &nbsp;
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudCard Class="pa-4">
+                            <MudText Typo="Typo.subtitle2">@string.Format(T("TopPrintersTitleFormat", "Top printers ({0}d)"), _printerDays)</MudText>
+
+                            @if (_topPrinters.Count == 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mt-2">@T("NoData", "No data")</MudText>
+                            }
+                            else
+                            {
+                                <MudTable Items="_topPrinters"
+                                          Dense="true"
+                                          Hover="true"
+                                          Elevation="0"
+                                          Class="mt-2"
+                                          RowClassFunc="@(new Func<PrinterRow, int, string>((row, index) => row.DeviceId > 0 ? "clickable-row" : string.Empty))"
+                                          RowClick="OnPrinterRowClick">
+                                    <HeaderContent>
+                                        <MudTh>@T("TableHostname", "Hostname")</MudTh>
+                                        <MudTh>@T("TableModel", "Model")</MudTh>
+                                        <MudTh>@T("TableLocation", "Location")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TablePages", "Pages")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableColor", "Color")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableMono", "Mono")</MudTh>
+                                        <MudTh Style="text-align:right;">@T("TableCost", "Cost")</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>@context.Hostname</MudTd>
+                                        <MudTd>@context.Model</MudTd>
+                                        <MudTd>@context.Location</MudTd>
+                                        <MudTd Style="text-align:right;">@context.PagesText</MudTd>
+                                        <MudTd Style="text-align:right;">@context.ColorPagesText</MudTd>
+                                        <MudTd Style="text-align:right;">@context.MonoPagesText</MudTd>
+                                        <MudTd Style="text-align:right;">@context.CostText</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        </MudCard>
+                    </MudItem>
+
+                </MudGrid>
+            }
+
+        </div>
+
+    </MudStack>
+</MudPaper>
+
+@code {
+    private const int TicketTrendDays = 30;
+
+    private bool _isLoading = true;
+    private string? _errorMessage;
+
+    private bool _ticketsSchemaReady;
+    private string? _ticketsSchemaDiagnostic;
+
+    private int? _ticketsOpened30;
+    private int? _ticketsClosed30;
+    private int? _ticketsQueue;
+    private int? _ticketsInProgress;
+    private int? _ticketsWaiting;
+
+    private decimal? _ticketsOpened30ChangePct;
+    private decimal? _ticketsClosed30ChangePct;
+    private decimal? _ticketsQueueChangePct;
+    private decimal? _ticketsInProgressChangePct;
+    private decimal? _ticketsWaitingChangePct;
+
+    private readonly List<TicketListRow> _topOldestActiveTickets = new();
+    private readonly List<TicketListRow> _topStaleActiveTickets = new();
+    private readonly List<TicketListRow> _topOldestWaitingTickets = new();
+    private readonly List<TicketListRow> _topStaleWaitingTickets = new();
+
+    private readonly List<LicenseRow> _topExpiringLicenses = new();
+    private readonly List<LicenseRow> _topUnusedLicenses = new();
+
+    private int _printerDays = 30;
+
+    private long? _printerPagesInRange;
+    private long? _printerColorPagesInRange;
+    private long? _printerMonoPagesInRange;
+
+    private decimal? _printerTotalCostInRange;
+    private decimal? _printerColorCostInRange;
+    private decimal? _printerMonoCostInRange;
+
+    private decimal? _printerPagesChangePct;
+    private decimal? _printerColorPagesChangePct;
+    private decimal? _printerMonoPagesChangePct;
+    private decimal? _printerCostChangePct;
+
+    private readonly List<PrinterRow> _topPrinters = new();
+    private int _printersRequestVersion;
+
+    private int? _devicesTotal;
+    private readonly List<AssetTypeRow> _assetTypeBreakdown = new();
+    private string[] _assetTypeChartLabels = Array.Empty<string>();
+    private double[] _assetTypeChartData = Array.Empty<double>();
+
+    private int? _backupOk;
+    private int? _backupWarning;
+    private int? _backupFailed;
+    private int? _backupDisabled;
+    private readonly List<BackupHealthRow> _backupIssues = new();
+
+    // Helper do markupu @T("Key","Fallback")
+    private string T(string key, string fallback)
+    {
+        try
+        {
+            var s = L[key];
+            if (s.ResourceNotFound) return fallback;
+
+            var v = s.Value;
+            return string.IsNullOrWhiteSpace(v) ? fallback : v;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        await LoadAllAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnPrinterDaysChanged(int value)
+    {
+        _printerDays = value;
+
+        var version = Interlocked.Increment(ref _printersRequestVersion);
+        await LoadPrintersAsync(version);
+
+        StateHasChanged();
+    }
+
+    private async Task LoadAllAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        _ticketsSchemaReady = false;
+        _ticketsSchemaDiagnostic = null;
+
+        _ticketsOpened30 = null;
+        _ticketsClosed30 = null;
+        _ticketsQueue = null;
+        _ticketsInProgress = null;
+        _ticketsWaiting = null;
+
+        _ticketsOpened30ChangePct = null;
+        _ticketsClosed30ChangePct = null;
+        _ticketsQueueChangePct = null;
+        _ticketsInProgressChangePct = null;
+        _ticketsWaitingChangePct = null;
+
+        _topOldestActiveTickets.Clear();
+        _topStaleActiveTickets.Clear();
+        _topOldestWaitingTickets.Clear();
+        _topStaleWaitingTickets.Clear();
+
+        _topExpiringLicenses.Clear();
+        _topUnusedLicenses.Clear();
+
+        _printerPagesInRange = null;
+        _printerColorPagesInRange = null;
+        _printerMonoPagesInRange = null;
+
+        _printerTotalCostInRange = null;
+        _printerColorCostInRange = null;
+        _printerMonoCostInRange = null;
+
+        _printerPagesChangePct = null;
+        _printerColorPagesChangePct = null;
+        _printerMonoPagesChangePct = null;
+        _printerCostChangePct = null;
+
+        _topPrinters.Clear();
+
+        _devicesTotal = null;
+        _assetTypeBreakdown.Clear();
+        _assetTypeChartLabels = Array.Empty<string>();
+        _assetTypeChartData = Array.Empty<double>();
+
+        _backupOk = null;
+        _backupWarning = null;
+        _backupFailed = null;
+        _backupDisabled = null;
+        _backupIssues.Clear();
+
+        try
+        {
+            var cs = Configuration.GetConnectionString("ITManagerConnection");
+            if (string.IsNullOrWhiteSpace(cs))
+            {
+                _errorMessage = L["MissingConnectionString"];
+                return;
+            }
+
+            using var conn = new SqlConnection(cs);
+            await conn.OpenAsync();
+
+            var (schema, diag) = await ResolveTicketSchemaAsync(conn);
+            _ticketsSchemaReady = schema != null;
+            _ticketsSchemaDiagnostic = diag;
+
+            if (_ticketsSchemaReady && schema != null)
+                await LoadTicketsAsync(conn, schema);
+
+            await LoadLicensesAsync(conn);
+            await LoadAssetsAsync(conn);
+            await LoadBackupsAsync(conn);
+
+            var version = Interlocked.Increment(ref _printersRequestVersion);
+            await LoadPrintersAsync(conn, version);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Dashboard] Error: " + ex);
+            _errorMessage = L["DbLoadFailed"];
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    // =========================================================
+    // Tickets schema
+    // =========================================================
+
+    private async Task<(TicketSchema? Schema, string? Diagnostic)> ResolveTicketSchemaAsync(SqlConnection conn)
+    {
+        var hasTickets = await ExistsTableAsync(conn, "dbo", "tickets");
+        var hasActions = await ExistsTableAsync(conn, "dbo", "ticket_actions");
+        var hasStatuses = await ExistsTableAsync(conn, "dbo", "ticket_statuses");
+
+        if (!hasTickets || !hasActions || !hasStatuses)
+        {
+            var missing = new List<string>();
+            if (!hasTickets) missing.Add("dbo.tickets");
+            if (!hasActions) missing.Add("dbo.ticket_actions");
+            if (!hasStatuses) missing.Add("dbo.ticket_statuses");
+
+            return (null, "Tickets: Missing required table(s): " + string.Join(", ", missing));
+        }
+
+        var required = new List<(string Schema, string Table, string Column)>
+        {
+            ("dbo", "tickets", "id"),
+            ("dbo", "tickets", "ticket_title"),
+            ("dbo", "tickets", "ticket_request_date"),
+            ("dbo", "tickets", "ticket_priority_value"),
+            ("dbo", "tickets", "ticket_status_id"),
+
+            ("dbo", "ticket_actions", "id"),
+            ("dbo", "ticket_actions", "ticket_id"),
+            ("dbo", "ticket_actions", "created_at"),
+            ("dbo", "ticket_actions", "status_to_id"),
+
+            ("dbo", "ticket_statuses", "id"),
+            ("dbo", "ticket_statuses", "name")
+        };
+
+        var missingCols = new List<string>();
+        foreach (var (schema, table, col) in required)
+        {
+            if (!await ExistsColumnAsync(conn, schema, table, col))
+                missingCols.Add($"{schema}.{table}.{col}");
+        }
+
+        if (missingCols.Count > 0)
+            return (null, "Tickets: Missing column " + string.Join(", ", missingCols));
+
+        var s = new TicketSchema
+        {
+            TicketTable = "dbo.tickets",
+            ActionsTable = "dbo.ticket_actions",
+            StatusesTable = "dbo.ticket_statuses",
+
+            TicketIdCol = "id",
+            TicketTitleCol = "ticket_title",
+            TicketCreatedCol = "ticket_request_date",
+            TicketPriorityCol = "ticket_priority_value",
+            TicketStatusIdCol = "ticket_status_id",
+
+            ActionIdCol = "id",
+            ActionTicketIdCol = "ticket_id",
+            ActionDateCol = "created_at",
+            ActionStatusToIdCol = "status_to_id",
+
+            StatusIdCol = "id",
+            StatusNameCol = "name"
+        };
+
+        return (s, null);
+    }
+
+    // =========================================================
+    // Tickets load + KPI
+    // =========================================================
+
+    private async Task LoadTicketsAsync(SqlConnection conn, TicketSchema s)
+    {
+        var now = DateTime.Now;
+        var currFrom = now.AddDays(-TicketTrendDays);
+        var currTo = now;
+
+        var prevFrom = now.AddDays(-2 * TicketTrendDays);
+        var prevTo = now.AddDays(-TicketTrendDays);
+
+        _ticketsOpened30 = await CountTicketsOpenedAsync(conn, s, currFrom, currTo);
+        var prevOpened = await CountTicketsOpenedAsync(conn, s, prevFrom, prevTo);
+        _ticketsOpened30ChangePct = CalcChangePct(_ticketsOpened30.GetValueOrDefault(0), prevOpened);
+
+        _ticketsClosed30 = await CountTicketsClosedByLastActionAsync(conn, s, currFrom, currTo);
+        var prevClosed = await CountTicketsClosedByLastActionAsync(conn, s, prevFrom, prevTo);
+        _ticketsClosed30ChangePct = CalcChangePct(_ticketsClosed30.GetValueOrDefault(0), prevClosed);
+
+        _ticketsQueue = await CountTicketsByCurrentStatusAsync(conn, s, TicketStatusGroups.QueueNames);
+        _ticketsInProgress = await CountTicketsByCurrentStatusAsync(conn, s, TicketStatusGroups.InProgressNames);
+        _ticketsWaiting = await CountTicketsByCurrentStatusAsync(conn, s, TicketStatusGroups.WaitingNames);
+
+        var currQueueMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.QueueNames, currFrom, currTo);
+        var prevQueueMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.QueueNames, prevFrom, prevTo);
+        _ticketsQueueChangePct = CalcChangePct(currQueueMoves, prevQueueMoves);
+
+        var currInProgMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.InProgressNames, currFrom, currTo);
+        var prevInProgMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.InProgressNames, prevFrom, prevTo);
+        _ticketsInProgressChangePct = CalcChangePct(currInProgMoves, prevInProgMoves);
+
+        var currWaitMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.WaitingNames, currFrom, currTo);
+        var prevWaitMoves = await CountTicketsMovedToStatusAsync(conn, s, TicketStatusGroups.WaitingNames, prevFrom, prevTo);
+        _ticketsWaitingChangePct = CalcChangePct(currWaitMoves, prevWaitMoves);
+
+        _topOldestActiveTickets.Clear();
+        _topStaleActiveTickets.Clear();
+        _topOldestWaitingTickets.Clear();
+        _topStaleWaitingTickets.Clear();
+
+        _topOldestActiveTickets.AddRange(await LoadTopOldestByStatusAsync(conn, s, TicketStatusGroups.ActiveNames, 5));
+        _topStaleActiveTickets.AddRange(await LoadTopStaleByStatusAsync(conn, s, TicketStatusGroups.ActiveNames, 5));
+
+        _topOldestWaitingTickets.AddRange(await LoadTopOldestByStatusAsync(conn, s, TicketStatusGroups.WaitingNames, 5));
+        _topStaleWaitingTickets.AddRange(await LoadTopStaleByStatusAsync(conn, s, TicketStatusGroups.WaitingNames, 5));
+    }
+
+    private string BuildLastActionApply(TicketSchema s)
+    {
+        var orderTail = $"ORDER BY ta.[{s.ActionDateCol}] DESC, ta.[{s.ActionIdCol}] DESC";
+
+        return
+            "OUTER APPLY ( " +
+            "SELECT TOP 1 " +
+            $"ta.[{s.ActionDateCol}] AS last_action_date, " +
+            $"ta.[{s.ActionStatusToIdCol}] AS last_status_id " +
+            $"FROM {s.ActionsTable} ta " +
+            $"WHERE ta.[{s.ActionTicketIdCol}] = t.[{s.TicketIdCol}] " +
+            orderTail +
+            ") la " +
+            $"LEFT JOIN {s.StatusesTable} st ON st.[{s.StatusIdCol}] = la.last_status_id ";
+    }
+
+    private async Task<int> CountTicketsOpenedAsync(SqlConnection conn, TicketSchema s, DateTime from, DateTime to)
+    {
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 15;
+
+        cmd.CommandText =
+            $"SELECT COUNT(*) FROM {s.TicketTable} t " +
+            $"WHERE t.[{s.TicketCreatedCol}] >= @from AND t.[{s.TicketCreatedCol}] < @to;";
+
+        cmd.Parameters.AddWithValue("@from", from);
+        cmd.Parameters.AddWithValue("@to", to);
+
+        var result = await cmd.ExecuteScalarAsync();
+        return (result == null || result == DBNull.Value) ? 0 : Convert.ToInt32(result);
+    }
+
+    private async Task<int> CountTicketsClosedByLastActionAsync(SqlConnection conn, TicketSchema s, DateTime from, DateTime to)
+    {
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 20;
+
+        var closeList = TicketStatusGroups.ClosedNames;
+        var inList = BuildParamList("@c", closeList.Count);
+
+        cmd.CommandText =
+            $"SELECT COUNT(*) " +
+            $"FROM {s.TicketTable} t " +
+            BuildLastActionApply(s) +
+            $"WHERE la.last_action_date >= @from AND la.last_action_date < @to " +
+            $"AND st.[{s.StatusNameCol}] IN ({inList});";
+
+        AddStringListParams(cmd, "@c", closeList);
+        cmd.Parameters.AddWithValue("@from", from);
+        cmd.Parameters.AddWithValue("@to", to);
+
+        var result = await cmd.ExecuteScalarAsync();
+        return (result == null || result == DBNull.Value) ? 0 : Convert.ToInt32(result);
+    }
+
+    private async Task<int> CountTicketsByCurrentStatusAsync(SqlConnection conn, TicketSchema s, IReadOnlyList<string> statuses)
+    {
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 20;
+
+        var inList = BuildParamList("@s", statuses.Count);
+
+        cmd.CommandText =
+            $"SELECT COUNT(*) " +
+            $"FROM {s.TicketTable} t " +
+            BuildLastActionApply(s) +
+            $"LEFT JOIN {s.StatusesTable} stt ON stt.[{s.StatusIdCol}] = t.[{s.TicketStatusIdCol}] " +
+            $"WHERE ISNULL(st.[{s.StatusNameCol}], ISNULL(stt.[{s.StatusNameCol}], 'New')) IN ({inList});";
+
+        AddStringListParams(cmd, "@s", statuses);
+
+        var result = await cmd.ExecuteScalarAsync();
+        return (result == null || result == DBNull.Value) ? 0 : Convert.ToInt32(result);
+    }
+
+    private async Task<int> CountTicketsMovedToStatusAsync(SqlConnection conn, TicketSchema s, IReadOnlyList<string> statuses, DateTime from, DateTime to)
+    {
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 20;
+
+        var inList = BuildParamList("@s", statuses.Count);
+
+        cmd.CommandText =
+            $"SELECT COUNT(*) " +
+            $"FROM {s.TicketTable} t " +
+            BuildLastActionApply(s) +
+            $"WHERE la.last_action_date >= @from AND la.last_action_date < @to " +
+            $"AND st.[{s.StatusNameCol}] IN ({inList});";
+
+        AddStringListParams(cmd, "@s", statuses);
+        cmd.Parameters.AddWithValue("@from", from);
+        cmd.Parameters.AddWithValue("@to", to);
+
+        var result = await cmd.ExecuteScalarAsync();
+        return (result == null || result == DBNull.Value) ? 0 : Convert.ToInt32(result);
+    }
+
+    private async Task<List<TicketListRow>> LoadTopOldestByStatusAsync(SqlConnection conn, TicketSchema s, IReadOnlyList<string> statuses, int take)
+    {
+        var inList = BuildParamList("@s", statuses.Count);
+
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 20;
+
+        cmd.CommandText =
+            $"SELECT TOP {take} " +
+            $"t.[{s.TicketIdCol}] AS id, " +
+            $"t.[{s.TicketTitleCol}] AS ticket_title, " +
+            $"ISNULL(st.[{s.StatusNameCol}], 'New') AS status_name, " +
+            $"t.[{s.TicketPriorityCol}] AS priority_raw, " +
+            $"DATEDIFF(day, t.[{s.TicketCreatedCol}], GETDATE()) AS age_days, " +
+            $"DATEDIFF(day, la.last_action_date, GETDATE()) AS last_action_age_days " +
+            $"FROM {s.TicketTable} t " +
+            BuildLastActionApply(s) +
+            $"WHERE ISNULL(st.[{s.StatusNameCol}], 'New') IN ({inList}) " +
+            $"ORDER BY t.[{s.TicketCreatedCol}] ASC;";
+
+        AddStringListParams(cmd, "@s", statuses);
+        return await ReadTicketListAsync(cmd);
+    }
+
+    private async Task<List<TicketListRow>> LoadTopStaleByStatusAsync(SqlConnection conn, TicketSchema s, IReadOnlyList<string> statuses, int take)
+    {
+        var inList = BuildParamList("@s", statuses.Count);
+
+        using var cmd = new SqlCommand();
+        cmd.Connection = conn;
+        cmd.CommandTimeout = 20;
+
+        cmd.CommandText =
+            $"SELECT TOP {take} " +
+            $"t.[{s.TicketIdCol}] AS id, " +
+            $"t.[{s.TicketTitleCol}] AS ticket_title, " +
+            $"ISNULL(st.[{s.StatusNameCol}], 'New') AS status_name, " +
+            $"t.[{s.TicketPriorityCol}] AS priority_raw, " +
+            $"DATEDIFF(day, t.[{s.TicketCreatedCol}], GETDATE()) AS age_days, " +
+            $"DATEDIFF(day, la.last_action_date, GETDATE()) AS last_action_age_days " +
+            $"FROM {s.TicketTable} t " +
+            BuildLastActionApply(s) +
+            $"WHERE ISNULL(st.[{s.StatusNameCol}], 'New') IN ({inList}) " +
+            $"AND la.last_action_date IS NOT NULL " +
+            $"ORDER BY la.last_action_date ASC;";
+
+        AddStringListParams(cmd, "@s", statuses);
+        return await ReadTicketListAsync(cmd);
+    }
+
+    private async Task<List<TicketListRow>> ReadTicketListAsync(SqlCommand cmd)
+    {
+        using var reader = await cmd.ExecuteReaderAsync();
+        var listOut = new List<TicketListRow>();
+
+        while (await reader.ReadAsync())
+        {
+            var id = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+            var title = reader.IsDBNull(1) ? string.Empty : (reader.GetString(1) ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(title)) title = L["NoTitle"];
+
+            var status = reader.IsDBNull(2) ? string.Empty : (reader.GetString(2) ?? string.Empty);
+
+            var priorityRaw = reader.IsDBNull(3) ? null : reader.GetValue(3);
+            var weight = ParsePriorityWeight(priorityRaw);
+            var tag = GetPriorityTag(weight);
+            var text = BuildPriorityText(weight);
+
+            var ageDays = reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4));
+            var lastActionAge = reader.IsDBNull(5) ? 0 : Convert.ToInt32(reader.GetValue(5));
+
+            listOut.Add(new TicketListRow
+            {
+                Id = id,
+                Title = title,
+                Status = status,
+
+                WeightPriority = weight,
+                PriorityTag = tag,
+                PriorityText = text,
+
+                AgeDays = ageDays,
+                LastActionAgeDays = lastActionAge
+            });
+        }
+
+        return listOut;
+    }
+
+    // =========================================================
+    // Priorytet jak w TicketsIndex.razor
+    // =========================================================
+
+    private static int ParsePriorityWeight(object? raw)
+    {
+        if (raw == null || raw == DBNull.Value)
+            return 0;
+
+        try
+        {
+            int w;
+
+            if (raw is int i) w = i;
+            else if (raw is long l) w = (int)l;
+            else if (raw is short s) w = s;
+            else if (raw is byte b) w = b;
+            else if (raw is decimal d) w = (int)d;
+            else if (raw is double db) w = (int)db;
+            else
+            {
+                var txt = raw.ToString();
+                if (string.IsNullOrWhiteSpace(txt)) return 0;
+                if (!int.TryParse(txt, out w)) return 0;
+            }
+
+            if (w <= 0) return 0;
+            return Math.Max(1, Math.Min(120, w));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static string GetPriorityTag(int weightPriority)
+    {
+        var s = weightPriority;
+
+        if (s >= 80) return "Emergency";
+        if (s >= 50) return "Very High";
+        if (s >= 30) return "High";
+        if (s >= 15) return "Medium";
+        if (s >= 1) return "Low";
+        return "None";
+    }
+
+    private static string BuildPriorityText(int weightPriority)
+    {
+        if (weightPriority <= 0) return "-";
+        var clamped = Math.Max(1, Math.Min(120, weightPriority));
+        var tag = GetPriorityTag(clamped);
+        return $"{tag} ({clamped})";
+    }
+
+    private static Color GetPriorityColorByTag(string? priorityTag)
+    {
+        var tag = (priorityTag ?? string.Empty).Trim();
+
+        return tag switch
+        {
+            "Emergency" => Color.Error,
+            "Very High" => Color.Error,
+            "High" => Color.Warning,
+            "Medium" => Color.Info,
+            "Low" => Color.Success,
+            _ => Color.Default
+        };
+    }
+
+    private RenderFragment PriorityChip(TicketListRow row) => builder =>
+    {
+        var color = GetPriorityColorByTag(row?.PriorityTag);
+
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddAttribute(1, "Size", Size.Small);
+        builder.AddAttribute(2, "Color", color);
+        builder.AddAttribute(3, "Variant", Variant.Filled);
+        builder.AddAttribute(4, "Label", true);
+        builder.AddAttribute(5, "Style", "min-width:110px; justify-content:center;");
+        builder.AddAttribute(6, "ChildContent", (RenderFragment)(b =>
+        {
+            b.AddContent(0, row?.PriorityText ?? "-");
+        }));
+        builder.CloseComponent();
+    };
+
+    // =========================================================
+    // Licenses
+    // =========================================================
+
+    private async Task LoadLicensesAsync(SqlConnection conn)
+    {
+        var expiringLocal = new List<LicenseRow>();
+        var unusedLocal = new List<LicenseRow>();
+
+        try
+        {
+            var sqlExpiring =
+                "SELECT TOP 5 " +
+                "l.id, " +
+                "ISNULL(lt.name,'') AS type_name, " +
+                "ISNULL(p.name,'')  AS producer_name, " +
+                "ISNULL(l.name,'')  AS license_name, " +
+                "ISNULL(u.DisplayName,'') AS display_name, " +
+                "l.subscription_ends, " +
+                "ISNULL(ls.name,'') AS status_name, " +
+                "ISNULL(l.inventory_no,'') AS inventory_no, " +
+                "l.subscription_starts " +
+                "FROM dbo.licenses l " +
+                "LEFT JOIN dbo.license_types lt ON l.type_id = lt.id " +
+                "LEFT JOIN dbo.license_statuses ls ON l.status_id = ls.id " +
+                "LEFT JOIN dbo.producers p ON l.producer_id = p.id " +
+                "LEFT JOIN dbo.users u ON l.user_id = u.id " +
+                "WHERE l.subscription_ends IS NOT NULL " +
+                "ORDER BY l.subscription_ends ASC;";
+
+            using var cmd = new SqlCommand(sqlExpiring, conn);
+            cmd.CommandTimeout = 10;
+
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var start = r.IsDBNull(8) ? (DateTime?)null : Convert.ToDateTime(r.GetValue(8));
+                var end = r.IsDBNull(5) ? (DateTime?)null : Convert.ToDateTime(r.GetValue(5));
+
+                expiringLocal.Add(new LicenseRow
+                {
+                    Id = r.IsDBNull(0) ? 0 : Convert.ToInt32(r.GetValue(0)),
+                    TypeName = r.IsDBNull(1) ? string.Empty : (r.GetString(1) ?? string.Empty),
+                    ProducerName = r.IsDBNull(2) ? string.Empty : (r.GetString(2) ?? string.Empty),
+                    LicenseName = r.IsDBNull(3) ? string.Empty : (r.GetString(3) ?? string.Empty),
+                    UserDisplayName = r.IsDBNull(4) ? string.Empty : (r.GetString(4) ?? string.Empty),
+                    SubscriptionStartDate = start,
+                    SubscriptionEndDate = end,
+                    StatusName = r.IsDBNull(6) ? string.Empty : (r.GetString(6) ?? string.Empty),
+                    InventoryNo = r.IsDBNull(7) ? string.Empty : (r.GetString(7) ?? string.Empty),
+                    DaysLeftText = BuildDaysLeftText(end),
+                    SubscriptionText = BuildSubscriptionText(start, end)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Dashboard] Licenses expiring query failed: " + ex);
+        }
+
+        try
+        {
+            var sqlUnused =
+                "SELECT TOP 5 " +
+                "l.id, " +
+                "ISNULL(lt.name,'') AS type_name, " +
+                "ISNULL(p.name,'')  AS producer_name, " +
+                "ISNULL(l.name,'')  AS license_name, " +
+                "ISNULL(l.inventory_no,'') AS inventory_no, " +
+                "ISNULL(ls.name,'') AS status_name, " +
+                "l.subscription_starts, " +
+                "l.subscription_ends " +
+                "FROM dbo.licenses l " +
+                "LEFT JOIN dbo.license_types lt ON l.type_id = lt.id " +
+                "LEFT JOIN dbo.license_statuses ls ON l.status_id = ls.id " +
+                "LEFT JOIN dbo.producers p ON l.producer_id = p.id " +
+                "WHERE l.user_id IS NULL " +
+                "ORDER BY l.name ASC;";
+
+            using var cmd = new SqlCommand(sqlUnused, conn);
+            cmd.CommandTimeout = 10;
+
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var start = r.IsDBNull(6) ? (DateTime?)null : Convert.ToDateTime(r.GetValue(6));
+                var end = r.IsDBNull(7) ? (DateTime?)null : Convert.ToDateTime(r.GetValue(7));
+
+                unusedLocal.Add(new LicenseRow
+                {
+                    Id = r.IsDBNull(0) ? 0 : Convert.ToInt32(r.GetValue(0)),
+                    TypeName = r.IsDBNull(1) ? string.Empty : (r.GetString(1) ?? string.Empty),
+                    ProducerName = r.IsDBNull(2) ? string.Empty : (r.GetString(2) ?? string.Empty),
+                    LicenseName = r.IsDBNull(3) ? string.Empty : (r.GetString(3) ?? string.Empty),
+                    InventoryNo = r.IsDBNull(4) ? string.Empty : (r.GetString(4) ?? string.Empty),
+                    StatusName = r.IsDBNull(5) ? string.Empty : (r.GetString(5) ?? string.Empty),
+                    SubscriptionStartDate = start,
+                    SubscriptionEndDate = end,
+                    UserDisplayName = string.Empty,
+                    DaysLeftText = BuildDaysLeftText(end),
+                    SubscriptionText = BuildSubscriptionText(start, end)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Dashboard] Licenses unused query failed: " + ex);
+        }
+
+        _topExpiringLicenses.Clear();
+        _topExpiringLicenses.AddRange(expiringLocal);
+
+        _topUnusedLicenses.Clear();
+        _topUnusedLicenses.AddRange(unusedLocal);
+    }
+
+    // =========================================================
+    // Assets
+    // =========================================================
+
+    private async Task LoadAssetsAsync(SqlConnection conn)
+    {
+        try
+        {
+            using (var cmd = new SqlCommand("SELECT COUNT(*) FROM dbo.devices;", conn))
+            {
+                cmd.CommandTimeout = 10;
+                var result = await cmd.ExecuteScalarAsync();
+                _devicesTotal = (result == null || result == DBNull.Value) ? 0 : Convert.ToInt32(result);
+            }
+
+            var hasDeviceKindsTable = await ExistsTableAsync(conn, "dbo", "device_kinds");
+            var hasDeviceKindId = await ExistsColumnAsync(conn, "dbo", "devices", "device_kind_id");
+
+            string sql;
+
+            if (hasDeviceKindsTable && hasDeviceKindId)
+            {
+                sql =
+                    "SELECT " +
+                    "ISNULL(dk.name,'Unknown') AS type_name, " +
+                    "COUNT(*) AS cnt " +
+                    "FROM dbo.devices d " +
+                    "LEFT JOIN dbo.device_kinds dk ON dk.id = d.device_kind_id " +
+                    "GROUP BY ISNULL(dk.name,'Unknown') " +
+                    "ORDER BY COUNT(*) DESC, ISNULL(dk.name,'Unknown') ASC;";
+            }
+            else
+            {
+                sql =
+                    "SELECT 'All devices' AS type_name, COUNT(*) AS cnt " +
+                    "FROM dbo.devices;";
+            }
+
+            var rows = new List<(string TypeName, int Count)>();
+
+            using (var cmd = new SqlCommand(sql, conn))
+            {
+                cmd.CommandTimeout = 10;
+
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    var typeName = r.IsDBNull(0) ? "Unknown" : (r.GetString(0) ?? "Unknown");
+                    var cnt = r.IsDBNull(1) ? 0 : Convert.ToInt32(r.GetValue(1));
+                    rows.Add((typeName, cnt));
+                }
+            }
+
+            _assetTypeBreakdown.Clear();
+
+            var total = _devicesTotal.GetValueOrDefault(0);
+            if (total <= 0)
+            {
+                _assetTypeChartLabels = Array.Empty<string>();
+                _assetTypeChartData = Array.Empty<double>();
+                return;
+            }
+
+            var ordered = rows
+                .Where(x => x.Count > 0)
+                .OrderByDescending(x => x.Count)
+                .ToList();
+
+            var maxSlices = 8;
+            var main = ordered.Take(maxSlices).ToList();
+            var rest = ordered.Skip(maxSlices).ToList();
+            var restSum = rest.Sum(x => x.Count);
+
+            var final = new List<(string TypeName, int Count)>();
+            final.AddRange(main);
+
+            if (restSum > 0)
+                final.Add(("Other", restSum));
+
+            foreach (var it in final)
+            {
+                var percent = total > 0 ? ((decimal)it.Count / total * 100m) : 0m;
+
+                _assetTypeBreakdown.Add(new AssetTypeRow
+                {
+                    TypeName = it.TypeName,
+                    Count = it.Count,
+                    Percent = percent,
+                    PercentText = percent.ToString("N1") + "%"
+                });
+            }
+
+            _assetTypeChartLabels = _assetTypeBreakdown.Select(x => x.TypeName).ToArray();
+            _assetTypeChartData = _assetTypeBreakdown.Select(x => (double)x.Count).ToArray();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Dashboard] Assets query failed: " + ex);
+
+            _devicesTotal = null;
+            _assetTypeBreakdown.Clear();
+            _assetTypeChartLabels = Array.Empty<string>();
+            _assetTypeChartData = Array.Empty<double>();
+        }
+    }
+
+    // =========================================================
+    // Backups
+    // =========================================================
+
+    private async Task LoadBackupsAsync(SqlConnection conn)
+    {
+        try
+        {
+            using (var cmd = new SqlCommand(
+                "SELECT health_state, COUNT(*) " +
+                "FROM dbo.vw_backup_health " +
+                "GROUP BY health_state;", conn))
+            {
+                cmd.CommandTimeout = 10;
+
+                using var r = await cmd.ExecuteReaderAsync();
+                var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+                while (await r.ReadAsync())
+                {
+                    var state = r.IsDBNull(0) ? string.Empty : (r.GetString(0) ?? string.Empty);
+                    var cnt = r.IsDBNull(1) ? 0 : Convert.ToInt32(r.GetValue(1));
+                    if (!string.IsNullOrWhiteSpace(state))
+                        counts[state] = cnt;
+                }
+
+                _backupOk = counts.TryGetValue("OK", out var ok) ? ok : 0;
+                _backupWarning = counts.TryGetValue("Warning", out var warn) ? warn : 0;
+                _backupFailed = counts.TryGetValue("Failed", out var failed) ? failed : 0;
+                _backupDisabled = counts.TryGetValue("Disabled", out var dis) ? dis : 0;
+            }
+
+            _backupIssues.Clear();
+
+            using (var cmd = new SqlCommand(
+                "SELECT TOP 10 " +
+                "system_id, system_name, backup_frequency_name, last_backup_status_name, last_backup_date, age_minutes, health_state " +
+                "FROM dbo.vw_backup_health " +
+                "WHERE health_state IN ('Failed','Warning') " +
+                "ORDER BY CASE health_state WHEN 'Failed' THEN 0 ELSE 1 END, ISNULL(age_minutes, 999999999) DESC;", conn))
+            {
+                cmd.CommandTimeout = 10;
+
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    var lastBackupDate = r.IsDBNull(4) ? (DateTime?)null : Convert.ToDateTime(r.GetValue(4));
+                    var ageMinutes = r.IsDBNull(5) ? (int?)null : Convert.ToInt32(r.GetValue(5));
+
+                    _backupIssues.Add(new BackupHealthRow
+                    {
+                        SystemId = r.IsDBNull(0) ? 0 : Convert.ToInt32(r.GetValue(0)),
+                        SystemName = r.IsDBNull(1) ? string.Empty : (r.GetString(1) ?? string.Empty),
+                        FrequencyName = r.IsDBNull(2) ? string.Empty : (r.GetString(2) ?? string.Empty),
+                        LastStatusName = r.IsDBNull(3) ? string.Empty : (r.GetString(3) ?? string.Empty),
+                        LastBackupDateText = lastBackupDate.HasValue ? lastBackupDate.Value.ToString("yyyy-MM-dd HH:mm") : L["NA"],
+                        AgeText = BuildAgeText(ageMinutes),
+                        HealthState = r.IsDBNull(6) ? string.Empty : (r.GetString(6) ?? string.Empty)
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Dashboard] Backups query failed: " + ex);
+
+            _backupOk = null;
+            _backupWarning = null;
+            _backupFailed = null;
+            _backupDisabled = null;
+            _backupIssues.Clear();
+        }
+    }
+
+    // =========================================================
+    // Printers
+    // =========================================================
+
+    private async Task LoadPrintersAsync(int requestVersion)
+    {
+        var cs = Configuration.GetConnectionString("ITManagerConnection");
+        if (string.IsNullOrWhiteSpace(cs))
+        {
+            _errorMessage = L["MissingConnectionString"];
+            return;
+        }
+
+        using var conn = new SqlConnection(cs);
+        await conn.OpenAsync();
+
+        await LoadPrintersAsync(conn, requestVersion);
+    }
+
+    private async Task LoadPrintersAsync(SqlConnection conn, int requestVersion)
+    {
+        long currPages = 0;
+        long currColor = 0;
+        long currMono = 0;
+
+        decimal? currTotalCost = null;
+        decimal? currColorCost = null;
+        decimal? currMonoCost = null;
+
+        long prevPages = 0;
+        long prevColor = 0;
+        long prevMono = 0;
+
+        decimal? prevTotalCost = null;
+
+        var topPrintersLocal = new List<PrinterRow>();
+
+        var now = DateTime.Now;
+        var currFrom = now.AddDays(-_printerDays);
+        var currTo = now;
+
+        var prevFrom = now.AddDays(-2 * _printerDays);
+        var prevTo = now.AddDays(-_printerDays);
+
+        var sqlAgg =
+            "SELECT " +
+            "CAST(ISNULL(SUM(CAST(cp.counter_total_difference as bigint)),0) as bigint) AS Pages, " +
+            "CAST(ISNULL(SUM(CAST(ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0) as bigint)),0) as bigint) AS ColorPages, " +
+            "CAST(ISNULL(SUM(CAST(ISNULL(cp.mono_prints_difference,0) + ISNULL(cp.mono_copies_difference,0) as bigint)),0) as bigint) AS MonoPages, " +
+            "CAST(ISNULL(SUM(CAST( " +
+            "ISNULL(CASE WHEN d.PrintCostColorPage IS NULL THEN 0 ELSE (ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0)) * d.PrintCostColorPage END, 0) + " +
+            "ISNULL(CASE WHEN d.PrintCostMonoPage  IS NULL THEN 0 ELSE (ISNULL(cp.mono_prints_difference,0)  + ISNULL(cp.mono_copies_difference,0))  * d.PrintCostMonoPage  END, 0) " +
+            "as decimal(18,2))),0) as decimal(18,2)) AS TotalCost, " +
+            "CAST(ISNULL(SUM(CAST( " +
+            "ISNULL(CASE WHEN d.PrintCostColorPage IS NULL THEN 0 ELSE (ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0)) * d.PrintCostColorPage END, 0) " +
+            "as decimal(18,2))),0) as decimal(18,2)) AS ColorCost, " +
+            "CAST(ISNULL(SUM(CAST( " +
+            "ISNULL(CASE WHEN d.PrintCostMonoPage IS NULL THEN 0 ELSE (ISNULL(cp.mono_prints_difference,0) + ISNULL(cp.mono_copies_difference,0)) * d.PrintCostMonoPage END, 0) " +
+            "as decimal(18,2))),0) as decimal(18,2)) AS MonoCost, " +
+            "CAST(MAX(CASE WHEN d.PrintCostColorPage IS NOT NULL OR d.PrintCostMonoPage IS NOT NULL THEN 1 ELSE 0 END) as bit) AS HasAnyCost " +
+            "FROM dbo.counter_printers cp " +
+            "INNER JOIN dbo.devices d ON d.id = cp.device_id " +
+            "WHERE cp.read_time >= @from AND cp.read_time < @to;";
+
+        using (var cmd = new SqlCommand(sqlAgg, conn))
+        {
+            cmd.CommandTimeout = 10;
+            cmd.Parameters.AddWithValue("@from", currFrom);
+            cmd.Parameters.AddWithValue("@to", currTo);
+
+            using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                currPages = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
+                currColor = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                currMono = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+
+                var totalCost = r.IsDBNull(3) ? 0m : Convert.ToDecimal(r.GetValue(3));
+                var colorCost = r.IsDBNull(4) ? 0m : Convert.ToDecimal(r.GetValue(4));
+                var monoCost = r.IsDBNull(5) ? 0m : Convert.ToDecimal(r.GetValue(5));
+                var hasAnyCost = !r.IsDBNull(6) && Convert.ToBoolean(r.GetValue(6));
+
+                currTotalCost = hasAnyCost ? totalCost : null;
+                currColorCost = hasAnyCost ? colorCost : null;
+                currMonoCost = hasAnyCost ? monoCost : null;
+            }
+        }
+
+        using (var cmd = new SqlCommand(sqlAgg, conn))
+        {
+            cmd.CommandTimeout = 10;
+            cmd.Parameters.AddWithValue("@from", prevFrom);
+            cmd.Parameters.AddWithValue("@to", prevTo);
+
+            using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                prevPages = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
+                prevColor = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                prevMono = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+
+                var totalCost = r.IsDBNull(3) ? 0m : Convert.ToDecimal(r.GetValue(3));
+                var hasAnyCost = !r.IsDBNull(6) && Convert.ToBoolean(r.GetValue(6));
+                prevTotalCost = hasAnyCost ? totalCost : null;
+            }
+        }
+
+        var sqlTop =
+            "SELECT TOP 10 " +
+            "d.id AS device_id, " +
+            "d.hostname, " +
+            "m.name AS model, " +
+            "l.name AS location_name, " +
+            "CAST(ISNULL(SUM(CAST(cp.counter_total_difference as bigint)),0) as bigint) AS pages, " +
+            "CAST(ISNULL(SUM(CAST(ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0) as bigint)),0) as bigint) AS color_pages, " +
+            "CAST(ISNULL(SUM(CAST(ISNULL(cp.mono_prints_difference,0) + ISNULL(cp.mono_copies_difference,0) as bigint)),0) as bigint) AS mono_pages, " +
+            "CAST(ISNULL(SUM(CAST( " +
+            "ISNULL(CASE WHEN d.PrintCostColorPage IS NULL THEN 0 ELSE (ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0)) * d.PrintCostColorPage END, 0) + " +
+            "ISNULL(CASE WHEN d.PrintCostMonoPage  IS NULL THEN 0 ELSE (ISNULL(cp.mono_prints_difference,0)  + ISNULL(cp.mono_copies_difference,0))  * d.PrintCostMonoPage  END, 0) " +
+            "as decimal(18,2))),0) as decimal(18,2)) AS total_cost, " +
+            "CAST(MAX(CASE WHEN d.PrintCostColorPage IS NOT NULL OR d.PrintCostMonoPage IS NOT NULL THEN 1 ELSE 0 END) as bit) AS has_cost " +
+            "FROM dbo.counter_printers cp " +
+            "INNER JOIN dbo.devices d ON d.id = cp.device_id " +
+            "LEFT JOIN dbo.models m ON m.id = d.model_id " +
+            "LEFT JOIN dbo.locations l ON l.id = d.location_id " +
+            "WHERE cp.read_time >= @from AND cp.read_time < @to " +
+            "GROUP BY d.id, d.hostname, m.name, l.name " +
+            "ORDER BY CAST(ISNULL(SUM(CAST( " +
+            "ISNULL(CASE WHEN d.PrintCostColorPage IS NULL THEN 0 ELSE (ISNULL(cp.color_prints_difference,0) + ISNULL(cp.color_copies_difference,0)) * d.PrintCostColorPage END, 0) + " +
+            "ISNULL(CASE WHEN d.PrintCostMonoPage  IS NULL THEN 0 ELSE (ISNULL(cp.mono_prints_difference,0)  + ISNULL(cp.mono_copies_difference,0))  * d.PrintCostMonoPage  END, 0) " +
+            "as decimal(18,2))),0) as decimal(18,2)) DESC;";
+
+        using (var cmd = new SqlCommand(sqlTop, conn))
+        {
+            cmd.CommandTimeout = 10;
+            cmd.Parameters.AddWithValue("@from", currFrom);
+            cmd.Parameters.AddWithValue("@to", currTo);
+
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var pages = r.IsDBNull(4) ? 0 : Convert.ToInt64(r.GetValue(4));
+                var colorPages = r.IsDBNull(5) ? 0 : Convert.ToInt64(r.GetValue(5));
+                var monoPages = r.IsDBNull(6) ? 0 : Convert.ToInt64(r.GetValue(6));
+
+                var hasCost = !r.IsDBNull(8) && Convert.ToBoolean(r.GetValue(8));
+                var cost = hasCost ? (r.IsDBNull(7) ? (decimal?)null : Convert.ToDecimal(r.GetValue(7))) : null;
+
+                topPrintersLocal.Add(new PrinterRow
+                {
+                    DeviceId = r.IsDBNull(0) ? 0 : Convert.ToInt32(r.GetValue(0)),
+                    Hostname = r.IsDBNull(1) ? string.Empty : (r.GetString(1) ?? string.Empty),
+                    Model = r.IsDBNull(2) ? string.Empty : (r.GetString(2) ?? string.Empty),
+                    Location = r.IsDBNull(3) ? string.Empty : (r.GetString(3) ?? string.Empty),
+
+                    Pages = pages,
+                    ColorPages = colorPages,
+                    MonoPages = monoPages,
+
+                    PagesText = pages.ToString("N0"),
+                    ColorPagesText = colorPages.ToString("N0"),
+                    MonoPagesText = monoPages.ToString("N0"),
+
+                    Cost = cost,
+                    CostText = cost.HasValue ? (cost.Value.ToString("N2") + " " + L["CurrencyPLN"]) : L["NA"]
+                });
+            }
+        }
+
+        if (requestVersion != _printersRequestVersion)
+            return;
+
+        _printerPagesInRange = currPages;
+        _printerColorPagesInRange = currColor;
+        _printerMonoPagesInRange = currMono;
+
+        _printerTotalCostInRange = currTotalCost;
+        _printerColorCostInRange = currColorCost;
+        _printerMonoCostInRange = currMonoCost;
+
+        _printerPagesChangePct = CalcChangePct(currPages, prevPages);
+        _printerColorPagesChangePct = CalcChangePct(currColor, prevColor);
+        _printerMonoPagesChangePct = CalcChangePct(currMono, prevMono);
+
+        _printerCostChangePct = (currTotalCost.HasValue && prevTotalCost.HasValue)
+            ? CalcChangePct(currTotalCost.Value, prevTotalCost.Value)
+            : null;
+
+        _topPrinters.Clear();
+        _topPrinters.AddRange(topPrintersLocal);
+    }
+
+    // =========================================================
+    // UI helpers
+    // =========================================================
+
+    private RenderFragment BackupStateChip(string? healthState) => builder =>
+    {
+        var state = healthState ?? string.Empty;
+        var (color, label) = GetBackupStateChipView(state);
+
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddAttribute(1, "Size", Size.Small);
+        builder.AddAttribute(2, "Color", color);
+        builder.AddAttribute(3, "Variant", Variant.Filled);
+        builder.AddAttribute(4, "Label", true);
+        builder.AddAttribute(5, "Style", "min-width:84px; justify-content:center;");
+        builder.AddAttribute(6, "ChildContent", (RenderFragment)(b => { b.AddContent(0, label); }));
+        builder.CloseComponent();
+    };
+
+    private (Color color, string label) GetBackupStateChipView(string healthState)
+    {
+        if (string.Equals(healthState, "OK", StringComparison.OrdinalIgnoreCase))
+            return (Color.Success, L["BackupOK"]);
+
+        if (string.Equals(healthState, "Warning", StringComparison.OrdinalIgnoreCase))
+            return (Color.Warning, L["BackupWarning"]);
+
+        if (string.Equals(healthState, "Failed", StringComparison.OrdinalIgnoreCase))
+            return (Color.Error, L["BackupFailed"]);
+
+        if (string.Equals(healthState, "Disabled", StringComparison.OrdinalIgnoreCase))
+            return (Color.Default, L["BackupDisabled"]);
+
+        return (Color.Default, string.IsNullOrWhiteSpace(healthState) ? L["NA"] : healthState);
+    }
+
+    private RenderFragment TrendChip(decimal? pct, string label) => builder =>
+    {
+        var (icon, cssColor, text) = GetTrendView(pct);
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "trend-chip");
+        builder.AddAttribute(2, "title", label);
+
+        builder.OpenComponent<MudIcon>(3);
+        builder.AddAttribute(4, "Icon", icon);
+        builder.AddAttribute(5, "Style", $"font-size:18px; vertical-align:middle; color:{cssColor};");
+        builder.CloseComponent();
+
+        builder.OpenComponent<MudText>(6);
+        builder.AddAttribute(7, "Typo", Typo.caption);
+        builder.AddAttribute(8, "Style", $"display:inline-block; margin-left:4px; color:{cssColor}; font-weight:600;");
+        builder.AddContent(9, text);
+        builder.CloseComponent();
+
+        builder.CloseElement();
+    };
+
+    private (string icon, string cssColor, string text) GetTrendView(decimal? pct)
+    {
+        if (!pct.HasValue)
+            return (Icons.Material.Filled.Remove, "rgba(0,0,0,0.38)", L["NA"]);
+
+        var v = pct.Value;
+
+        if (v > 0.0001m)
+            return (Icons.Material.Filled.ArrowOutward, "#f44336", string.Format(L["PercentFormat"], v));
+
+        if (v < -0.0001m)
+            return (Icons.Material.Filled.SouthEast, "#4caf50", string.Format(L["PercentFormat"], Math.Abs(v)));
+
+        return (Icons.Material.Filled.Remove, "rgba(0,0,0,0.38)", L["ZeroPercent"]);
+    }
+
+    private string Fmt(long? value) => value.HasValue ? value.Value.ToString("N0") : L["NA"];
+    private string Fmt(int? value) => value.HasValue ? value.Value.ToString("N0") : L["NA"];
+
+    private string FmtMoneyPln(decimal? value)
+    {
+        if (!value.HasValue) return L["NA"];
+        return value.Value.ToString("N2") + " " + L["CurrencyPLN"];
+    }
+
+    // =========================================================
+    // Shared helpers
+    // =========================================================
+
+    private static decimal? CalcChangePct(long current, long previous)
+    {
+        if (previous == 0)
+        {
+            if (current == 0) return 0m;
+            return null;
+        }
+
+        return ((decimal)current - previous) / previous * 100m;
+    }
+
+    private static decimal? CalcChangePct(decimal current, decimal previous)
+    {
+        if (previous == 0m)
+        {
+            if (current == 0m) return 0m;
+            return null;
+        }
+
+        return (current - previous) / previous * 100m;
+    }
+
+    private static decimal? CalcChangePct(int current, int previous)
+    {
+        if (previous == 0)
+        {
+            if (current == 0) return 0m;
+            return null;
+        }
+
+        return ((decimal)current - previous) / previous * 100m;
+    }
+
+    private static void AddStringListParams(SqlCommand cmd, string prefix, IEnumerable<string> values)
+    {
+        var i = 0;
+        foreach (var v in values)
+        {
+            cmd.Parameters.AddWithValue(prefix + i.ToString(), v);
+            i++;
+        }
+    }
+
+    private static string BuildParamList(string prefix, int count)
+    {
+        var parts = new List<string>();
+        for (var i = 0; i < count; i++)
+            parts.Add(prefix + i.ToString());
+        return string.Join(", ", parts);
+    }
+
+    private static async Task<bool> ExistsTableAsync(SqlConnection conn, string schemaName, string tableName)
+    {
+        using var cmd = new SqlCommand(
+            "SELECT CASE WHEN OBJECT_ID(@fullName, 'U') IS NULL THEN 0 ELSE 1 END;",
+            conn);
+
+        cmd.CommandTimeout = 10;
+        cmd.Parameters.AddWithValue("@fullName", schemaName + "." + tableName);
+
+        var result = await cmd.ExecuteScalarAsync();
+        if (result == null || result == DBNull.Value) return false;
+        return Convert.ToInt32(result) == 1;
+    }
+
+    private static async Task<bool> ExistsColumnAsync(SqlConnection conn, string schemaName, string tableName, string columnName)
+    {
+        using var cmd = new SqlCommand(
+            "SELECT CASE WHEN EXISTS ( " +
+            "SELECT 1 " +
+            "FROM sys.columns c " +
+            "INNER JOIN sys.objects o ON o.object_id = c.object_id " +
+            "INNER JOIN sys.schemas s ON s.schema_id = o.schema_id " +
+            "WHERE s.name = @schema AND o.name = @table AND c.name = @column " +
+            ") THEN 1 ELSE 0 END;",
+            conn);
+
+        cmd.CommandTimeout = 10;
+        cmd.Parameters.AddWithValue("@schema", schemaName);
+        cmd.Parameters.AddWithValue("@table", tableName);
+        cmd.Parameters.AddWithValue("@column", columnName);
+
+        var result = await cmd.ExecuteScalarAsync();
+        if (result == null || result == DBNull.Value) return false;
+        return Convert.ToInt32(result) == 1;
+    }
+
+    private static string BuildAgeText(int? minutes)
+    {
+        if (!minutes.HasValue) return string.Empty;
+
+        var m = minutes.Value;
+        if (m < 60) return m + " min";
+
+        var h = m / 60;
+        if (h < 48) return h + " h";
+
+        var d = h / 24;
+        return d + " d";
+    }
+
+    private string BuildDaysLeftText(DateTime? end)
+    {
+        if (!end.HasValue) return L["NA"];
+
+        var days = (end.Value.Date - DateTime.Now.Date).Days;
+
+        if (days < 0) return L["Expired"];
+        if (days == 0) return L["EndsToday"];
+        return string.Format(L["DaysLeftFormat"], days);
+    }
+
+    private string BuildSubscriptionText(DateTime? start, DateTime? end)
+    {
+        if (!start.HasValue && !end.HasValue) return L["NA"];
+
+        var s = start.HasValue ? start.Value.ToString("yyyy-MM-dd") : L["NA"];
+        var e = end.HasValue ? end.Value.ToString("yyyy-MM-dd") : L["NA"];
+
+        return s + " - " + e;
+    }
+
+    // =========================================================
+    // Status groups
+    // =========================================================
+
+    private static class TicketStatusGroups
+    {
+        public static readonly List<string> QueueNames = new()
+        {
+            "New", "Nowe",
+            "Assigned", "Przypisane"
+        };
+
+        public static readonly List<string> InProgressNames = new()
+        {
+            "In progress", "In Progress", "W toku", "Working"
+        };
+
+        public static readonly List<string> WaitingNames = new()
+        {
+            "Waiting", "Wstrzymane", "Oczekuje", "On hold"
+        };
+
+        public static readonly List<string> ClosedNames = new()
+        {
+            "Resolved", "Rozwiązane", "Rozwiazane",
+            "Closed", "Zamknięte", "Zamkniete",
+            "Cancelled", "Canceled", "Anulowane", "Anulowany"
+        };
+
+        public static readonly List<string> ActiveNames = new()
+        {
+            "New", "Nowe",
+            "Assigned", "Przypisane",
+            "In progress", "In Progress", "W toku", "Working"
+        };
+    }
+
+    // =========================================================
+    // Models
+    // =========================================================
+
+    private sealed class TicketSchema
+    {
+        public string TicketTable { get; set; } = string.Empty;
+        public string ActionsTable { get; set; } = string.Empty;
+        public string StatusesTable { get; set; } = string.Empty;
+
+        public string TicketIdCol { get; set; } = string.Empty;
+        public string TicketTitleCol { get; set; } = string.Empty;
+        public string TicketCreatedCol { get; set; } = string.Empty;
+        public string TicketPriorityCol { get; set; } = string.Empty;
+        public string TicketStatusIdCol { get; set; } = string.Empty;
+
+        public string ActionIdCol { get; set; } = string.Empty;
+        public string ActionTicketIdCol { get; set; } = string.Empty;
+        public string ActionDateCol { get; set; } = string.Empty;
+        public string ActionStatusToIdCol { get; set; } = string.Empty;
+
+        public string StatusIdCol { get; set; } = string.Empty;
+        public string StatusNameCol { get; set; } = string.Empty;
+    }
+
+    private sealed class TicketListRow
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+
+        public int WeightPriority { get; set; }
+        public string PriorityTag { get; set; } = "None";
+        public string PriorityText { get; set; } = "-";
+
+        public int AgeDays { get; set; }
+        public int LastActionAgeDays { get; set; }
+    }
+
+    private sealed class LicenseRow
+    {
+        public int Id { get; set; }
+        public string TypeName { get; set; } = string.Empty;
+        public string ProducerName { get; set; } = string.Empty;
+        public string LicenseName { get; set; } = string.Empty;
+        public string UserDisplayName { get; set; } = string.Empty;
+        public string StatusName { get; set; } = string.Empty;
+        public string InventoryNo { get; set; } = string.Empty;
+
+        public DateTime? SubscriptionStartDate { get; set; }
+        public DateTime? SubscriptionEndDate { get; set; }
+
+        public string SubscriptionText { get; set; } = string.Empty;
+        public string DaysLeftText { get; set; } = string.Empty;
+    }
+
+    private sealed class PrinterRow
+    {
+        public int DeviceId { get; set; }
+        public string Hostname { get; set; } = string.Empty;
+        public string Model { get; set; } = string.Empty;
+        public string Location { get; set; } = string.Empty;
+
+        public long Pages { get; set; }
+        public long ColorPages { get; set; }
+        public long MonoPages { get; set; }
+
+        public string PagesText { get; set; } = "0";
+        public string ColorPagesText { get; set; } = "0";
+        public string MonoPagesText { get; set; } = "0";
+
+        public decimal? Cost { get; set; }
+        public string CostText { get; set; } = string.Empty;
+    }
+
+    private sealed class AssetTypeRow
+    {
+        public string TypeName { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public decimal Percent { get; set; }
+
+        public string PercentText { get; set; } = "0.0%";
+    }
+
+    private sealed class BackupHealthRow
+    {
+        public int SystemId { get; set; }
+        public string SystemName { get; set; } = string.Empty;
+        public string FrequencyName { get; set; } = string.Empty;
+        public string LastStatusName { get; set; } = string.Empty;
+        public string LastBackupDateText { get; set; } = string.Empty;
+        public string AgeText { get; set; } = string.Empty;
+        public string HealthState { get; set; } = string.Empty;
+    }
+}

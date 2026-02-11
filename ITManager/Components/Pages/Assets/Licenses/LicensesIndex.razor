@@ -1,0 +1,1027 @@
+﻿@page "/assets/licenses"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Licenses.View")]
+
+@* File: Components/Pages/Assets/LicensesIndex.razor
+   Description: Lista licencji w oparciu o MudDataGrid. Widok spójny z Tickets i Devices.
+                Search zawsze widoczny + Advanced filters (collapse).
+                Filtry pod licencje: Type, Status, Producer, Model, User, Subscription (Active/Expired/Ends soon/No dates).
+   Updated: 2025-12-29 - wersja 1.14:
+     - Overlay ładowania przypięty do kontenera listy (nie zasłania całej strony).
+     - RowClick: async Task zamiast async void.
+   Updated: 2025-12-29 - wersja 1.15:
+     - Spójne zachowanie kliknięcia w wiersz: hover może zostać, ale bez zmiany kursora bez edit.
+     - Klik bez uprawnień generuje snackbar.
+     - Cursor pointer tylko gdy jest Assets.Licenses.Edit.
+   Updated: 2025-12-29 - wersja 1.16:
+     - Lokalizacja UI przez IStringLocalizer<LicensesIndex> (resx: LicensesIndex.resx, LicensesIndex.pl-PL.resx).
+   Updated: 2026-01-07 - FIX: otwieranie modala licencji (parametr dialogu zgodny z właściwością dialogu).
+   Updated: 2026-01-09 - wersja 1.17:
+     - RBAC: rozdzielenie Create/Edit/Delete. Add license wymaga Assets.Licenses.Create, klik w wiersz wymaga Assets.Licenses.Edit.
+     - UX: brak redirecta na / przy braku view, pokazujemy komunikat na stronie.
+   Updated: 2026-01-22 - wersja 1.18:
+     - Export: eksport widocznych danych gridu do XLSX (FilteredItems + ClosedXML) + download przez JS module.
+   Updated: 2026-01-23 - wersja 1.19:
+     - Grid: standard szerokości kolumn jak UsersIndex: procenty + table-layout fixed + ellipsis (dopasowanie do obszaru).
+   Updated: 2026-01-24 - wersja 1.20:
+     - TimeZone: "dziś" i nazwa pliku eksportu liczone wg strefy czasowej użytkownika (TimeZoneService).
+   Updated: 2026-01-24 - wersja 1.21:
+     - FIX: "dziś" odświeżane także przy lokalnych filtrach (bez reload), na bazie user TZ pobranej raz.
+     - CHANGE: nazwa pliku eksportu liczona lokalnie bez awaitów.
+   Updated: 2026-01-25 - wersja 1.22:
+     - Security: page-level policy Authorize (Perm:Assets.Licenses.View).
+     - Logging: ILogger zamiast Console.Error.
+   Updated: 2026-02-08 - wersja 1.23:
+     - RBAC spójnie jak Devices: permissiony liczone przez CurrentUserContextService.Can(...) + HasAccess.
+     - Klik w wiersz NIE otwiera dialogu bez Assets.Licenses.Edit, tylko snackbar.
+   Updated: 2026-02-08 - wersja 1.24:
+     - CHANGE: brak dialogu. Add license oraz klik w wiersz nawigują do page LicenseEdit (jak UserEdit).
+     - Routing (wymagane w projekcie):
+         /assets/licenses/edit/{Id:int}
+         /assets/licenses/create
+       returnUrl:
+         query string ?returnUrl=...
+     - Cleanup: usunięty IDialogService i using do dialogów.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@implements IAsyncDisposable
+
+@inject IStringLocalizer<LicensesIndex> L
+@inject LicensesService LicensesService
+@inject NavigationManager NavigationManager
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject TimeZoneService TimeZoneService
+@inject ILogger<LicensesIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* Tytuł + refresh + search *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="_isLoading || _isExporting || !_canViewLicenses" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="_isLoading || _isExporting || !_canViewLicenses"
+                              Class="license-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 license-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="_isLoading || _isExporting || !_canViewLicenses">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="_isLoading || _isExporting || !_canViewLicenses">
+                    @L["AdvancedFilters"]
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewLicenses)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="licenses-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 license-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Type"]"
+                                           Value="@_selectedType"
+                                           ValueChanged="OnTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var t in _lookupsTypes)
+                                    {
+                                        <MudSelectItem Value="@t">@t</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Status"]"
+                                           Value="@_selectedStatus"
+                                           ValueChanged="OnStatusChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var s in _lookupsStatuses)
+                                    {
+                                        <MudSelectItem Value="@s">@s</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Producer"]"
+                                           Value="@_selectedProducer"
+                                           ValueChanged="OnProducerChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var p in _lookupsProducers)
+                                    {
+                                        <MudSelectItem Value="@p">@p</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Model"]"
+                                           Value="@_selectedModel"
+                                           ValueChanged="OnModelChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var m in _lookupsModels)
+                                    {
+                                        <MudSelectItem Value="@m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.User"]"
+                                           Value="@_selectedUser"
+                                           ValueChanged="OnUserChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Clearable="true"
+                                           Strict="false"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var u in _lookupsUsers)
+                                    {
+                                        <MudSelectItem Value="@u">@u</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["SubscriptionLabel"]"
+                                           Value="@_selectedSubscriptionState"
+                                           ValueChanged="OnSubscriptionStateChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="_isLoading || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    <MudSelectItem Value="@SubActive">@L["Sub.Active"]</MudSelectItem>
+                                    <MudSelectItem Value="@SubExpired">@L["Sub.Expired"]</MudSelectItem>
+                                    <MudSelectItem Value="@SubEndsSoon">@L["Sub.EndsSoon"]</MudSelectItem>
+                                    <MudSelectItem Value="@SubNoDates">@L["Sub.NoDates"]</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenNewLicenseAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canCreateLicenses)">
+                        @L["AddLicense"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               Class="ml-2"
+                               OnClick="ExportVisibleToExcelAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewLicenses || (_filteredRows?.Count ?? 0) == 0)">
+                        @Txt("ExportExcel", "Export Excel")
+                    </MudButton>
+                </MudStack>
+
+                <MudDataGrid T="LicenseListRow"
+                             @ref="_grid"
+                             Class="licenses-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             @bind-RowsPerPage="_rowsPerPage"
+                             RowClick="OnRowClickAsync">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="LicenseListRow" PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        <PropertyColumn Property="x => x.Type"
+                                        Title="@L["Col.Type"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:9%;"
+                                        CellStyle="width:9%;" />
+
+                        <PropertyColumn Property="x => x.Name"
+                                        Title="@L["Col.Name"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:23%;"
+                                        CellStyle="width:23%;" />
+
+                        <PropertyColumn Property="x => x.Producer"
+                                        Title="@L["Col.Producer"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.Model"
+                                        Title="@L["Col.Model"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:14%;"
+                                        CellStyle="width:14%;" />
+
+                        <PropertyColumn Property="x => x.InventoryNo"
+                                        Title="@L["Col.InventoryNo"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;" />
+
+                        <PropertyColumn Property="x => x.User"
+                                        Title="@L["Col.User"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:14%;"
+                                        CellStyle="width:14%;" />
+
+                        <TemplateColumn Title="@L["Col.SubscriptionStart"]"
+                                        SortBy="@(x => x.SubscriptionStarts)"
+                                        HeaderStyle="width:6%;"
+                                        CellStyle="width:6%;">
+                            <CellTemplate Context="context">
+                                @(context.Item.SubscriptionStarts?.ToString("yyyy-MM-dd") ?? string.Empty)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <TemplateColumn Title="@L["Col.SubscriptionEnd"]"
+                                        SortBy="@(x => x.SubscriptionEnds)"
+                                        HeaderStyle="width:6%;"
+                                        CellStyle="width:6%;">
+                            <CellTemplate Context="context">
+                                @(context.Item.SubscriptionEnds?.ToString("yyyy-MM-dd") ?? string.Empty)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.Status"
+                                        Title="@L["Col.Status"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:6%;"
+                                        CellStyle="width:6%;" />
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@(_isLoading || _isExporting)"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="licenses-overlay">
+                    <MudPaper Class="pa-6 licenses-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @(_isExporting? Txt("Overlay_Exporting", "Eksportuję dane...") : L["LoadingData"])
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .license-row {
+        min-height: 44px;
+    }
+
+        .license-row td,
+        .license-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .license-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .license-row-clickable {
+        cursor: pointer;
+    }
+
+    .license-search {
+        min-width: 400px;
+    }
+
+    .license-filters-panel {
+        border-radius: 8px;
+    }
+
+    .license-clear-btn {
+        border-width: 1px;
+    }
+
+    .licenses-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .licenses-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .licenses-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .licenses-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .licenses-grid th,
+    .licenses-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+
+    private const string SubActive = "active";
+    private const string SubExpired = "expired";
+    private const string SubEndsSoon = "soon";
+    private const string SubNoDates = "nodates";
+
+    private static readonly TimeSpan DataLoadTimeout = TimeSpan.FromSeconds(30);
+
+    private bool _ready;
+    private bool _isLoading = true;
+    private bool _isExporting;
+
+    private bool _canViewLicenses;
+    private bool _canEditLicenses;
+    private bool _canCreateLicenses;
+    private bool _canDeleteLicenses;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+    private bool _showAdvancedFilters;
+
+    private List<LicenseListRow> _allRows = new();
+    private List<LicenseListRow> _filteredRows = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private string _selectedType = AllValue;
+    private string _selectedStatus = AllValue;
+    private string _selectedProducer = AllValue;
+    private string _selectedModel = AllValue;
+    private string _selectedUser = AllValue;
+    private string _selectedSubscriptionState = AllValue;
+
+    private List<string> _lookupsTypes = new();
+    private List<string> _lookupsStatuses = new();
+    private List<string> _lookupsProducers = new();
+    private List<string> _lookupsModels = new();
+    private List<string> _lookupsUsers = new();
+
+    private MudDataGrid<LicenseListRow>? _grid;
+    private IJSObjectReference? _downloadModule;
+
+    private DateTime _userToday = DateTime.Today;
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        var isAuth = ctx != null && ctx.IsAuthenticated && ctx.IsActive == true;
+        var hasAccess = CurrentUserContextService.HasAccess;
+
+        _canViewLicenses = isAuth && hasAccess && CurrentUserContextService.Can("Assets.Licenses.View");
+        _canEditLicenses = _canViewLicenses && CurrentUserContextService.Can("Assets.Licenses.Edit");
+        _canCreateLicenses = _canViewLicenses && CurrentUserContextService.Can("Assets.Licenses.Create");
+        _canDeleteLicenses = _canViewLicenses && CurrentUserContextService.Can("Assets.Licenses.Delete");
+
+        _ready = true;
+
+        if (!_canViewLicenses)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        RefreshUserToday();
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private void RefreshUserToday()
+    {
+        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+        _userToday = nowLocal.Date;
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_canViewLicenses || _isExporting)
+            return;
+
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            RefreshUserToday();
+
+            var loadTask = LicensesService.GetLicensesAsync();
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(DataLoadTimeout));
+
+            if (completedTask != loadTask)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = string.Format(L["TimeoutError"], (int)DataLoadTimeout.TotalSeconds);
+                Snackbar.Add(L["TimeoutSnackbar"], Severity.Error);
+                return;
+            }
+
+            var result = await loadTask;
+
+            if (!result.Ok)
+            {
+                _allRows = new();
+                _filteredRows = new();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add(L["LoadFailedSnackbar"], Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new();
+
+            BuildLookupsFromRows();
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicensesIndex] Load error.");
+            Snackbar.Add(L["LoadFailedTryLater"], Severity.Error);
+
+            _allRows = new();
+            _filteredRows = new();
+            _loadError = L["GenericLoadError"];
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+        _selectedType = AllValue;
+        _selectedStatus = AllValue;
+        _selectedProducer = AllValue;
+        _selectedModel = AllValue;
+        _selectedUser = AllValue;
+        _selectedSubscriptionState = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnTypeChangedAsync(string value)
+    {
+        _selectedType = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStatusChangedAsync(string value)
+    {
+        _selectedStatus = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnProducerChangedAsync(string value)
+    {
+        _selectedProducer = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnModelChangedAsync(string value)
+    {
+        _selectedModel = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnUserChangedAsync(string value)
+    {
+        _selectedUser = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSubscriptionStateChangedAsync(string value)
+    {
+        _selectedSubscriptionState = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+    {
+        RefreshUserToday();
+        _filteredRows = BuildFilteredRows();
+    }
+
+    private Task OpenNewLicenseAsync()
+    {
+        if (_isLoading || _isExporting)
+            return Task.CompletedTask;
+
+        if (!_canCreateLicenses)
+        {
+            Snackbar.Add(L["NoCreatePermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigateToLicenseEdit(licenseId: 0);
+        return Task.CompletedTask;
+    }
+
+    private Task OnRowClickAsync(DataGridRowClickEventArgs<LicenseListRow> args)
+    {
+        if (_isLoading || _isExporting)
+            return Task.CompletedTask;
+
+        var id = args?.Item?.Id ?? 0;
+        if (id <= 0)
+            return Task.CompletedTask;
+
+        if (!_canEditLicenses)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigateToLicenseEdit(licenseId: id);
+        return Task.CompletedTask;
+    }
+
+    private void NavigateToLicenseEdit(int licenseId)
+    {
+        var returnUrl = Uri.EscapeDataString("/assets/licenses");
+
+        if (licenseId <= 0)
+            NavigationManager.NavigateTo($"/assets/licenses/create?returnUrl={returnUrl}");
+        else
+            NavigationManager.NavigateTo($"/assets/licenses/edit/{licenseId}?returnUrl={returnUrl}");
+    }
+
+    private void BuildLookupsFromRows()
+    {
+        var rows = _allRows ?? new List<LicenseListRow>();
+
+        _lookupsTypes = rows.Select(x => (x.Type ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsStatuses = rows.Select(x => (x.Status ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsProducers = rows.Select(x => (x.Producer ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsModels = rows.Select(x => (x.Model ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsUsers = rows.Select(x => (x.User ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedType != AllValue && !_lookupsTypes.Contains(_selectedType, StringComparer.OrdinalIgnoreCase))
+            _selectedType = AllValue;
+
+        if (_selectedStatus != AllValue && !_lookupsStatuses.Contains(_selectedStatus, StringComparer.OrdinalIgnoreCase))
+            _selectedStatus = AllValue;
+
+        if (_selectedProducer != AllValue && !_lookupsProducers.Contains(_selectedProducer, StringComparer.OrdinalIgnoreCase))
+            _selectedProducer = AllValue;
+
+        if (_selectedModel != AllValue && !_lookupsModels.Contains(_selectedModel, StringComparer.OrdinalIgnoreCase))
+            _selectedModel = AllValue;
+
+        if (_selectedUser != AllValue && !_lookupsUsers.Contains(_selectedUser, StringComparer.OrdinalIgnoreCase))
+            _selectedUser = AllValue;
+
+        if (_selectedSubscriptionState != AllValue &&
+            _selectedSubscriptionState != SubActive &&
+            _selectedSubscriptionState != SubExpired &&
+            _selectedSubscriptionState != SubEndsSoon &&
+            _selectedSubscriptionState != SubNoDates)
+        {
+            _selectedSubscriptionState = AllValue;
+        }
+    }
+
+    private List<LicenseListRow> BuildFilteredRows()
+    {
+        IEnumerable<LicenseListRow> query = _allRows ?? new List<LicenseListRow>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.Type, term) ||
+                ContainsIgnoreCase(x.Status, term) ||
+                ContainsIgnoreCase(x.Producer, term) ||
+                ContainsIgnoreCase(x.Name, term) ||
+                ContainsIgnoreCase(x.InventoryNo, term) ||
+                ContainsIgnoreCase(x.User, term) ||
+                ContainsIgnoreCase(x.Model, term) ||
+                ContainsIgnoreCase(x.SubscriptionStarts?.ToString("yyyy-MM-dd") ?? string.Empty, term) ||
+                ContainsIgnoreCase(x.SubscriptionEnds?.ToString("yyyy-MM-dd") ?? string.Empty, term)
+            );
+        }
+
+        if (_selectedType != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Type, _selectedType));
+
+        if (_selectedStatus != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Status, _selectedStatus));
+
+        if (_selectedProducer != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Producer, _selectedProducer));
+
+        if (_selectedModel != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Model, _selectedModel));
+
+        if (_selectedUser != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.User, _selectedUser));
+
+        if (_selectedSubscriptionState != AllValue)
+        {
+            var today = _userToday;
+
+            if (_selectedSubscriptionState == SubNoDates)
+            {
+                query = query.Where(x => !x.SubscriptionStarts.HasValue && !x.SubscriptionEnds.HasValue);
+            }
+            else if (_selectedSubscriptionState == SubExpired)
+            {
+                query = query.Where(x => x.SubscriptionEnds.HasValue && x.SubscriptionEnds.Value.Date < today);
+            }
+            else if (_selectedSubscriptionState == SubActive)
+            {
+                query = query.Where(x => IsActiveSubscription(x, today));
+            }
+            else if (_selectedSubscriptionState == SubEndsSoon)
+            {
+                query = query.Where(x =>
+                    IsActiveSubscription(x, today) &&
+                    x.SubscriptionEnds.HasValue &&
+                    x.SubscriptionEnds.Value.Date >= today &&
+                    x.SubscriptionEnds.Value.Date <= today.AddDays(30));
+            }
+        }
+
+        return query.ToList();
+    }
+
+    private static bool IsActiveSubscription(LicenseListRow x, DateTime today)
+    {
+        var s = x.SubscriptionStarts?.Date;
+        var e = x.SubscriptionEnds?.Date;
+
+        if (s.HasValue && today < s.Value)
+            return false;
+
+        if (e.HasValue && today > e.Value)
+            return false;
+
+        return s.HasValue || e.HasValue;
+    }
+
+    private static bool EqualsIgnoreCaseTrim(string? a, string b)
+        => string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetRowClass(LicenseListRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditLicenses ? "license-row license-row-clickable" : "license-row";
+    }
+
+    private async Task ExportVisibleToExcelAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canViewLicenses)
+        {
+            Snackbar.Add(Txt("NoViewPermission", "Brak uprawnień do podglądu licencji."), Severity.Warning);
+            return;
+        }
+
+        var exportRows = GetExportRows();
+        if (exportRows.Count == 0)
+        {
+            Snackbar.Add(Txt("Msg_NoRecordsToExport", "Brak danych do eksportu."), Severity.Info);
+            return;
+        }
+
+        _isExporting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+            var fileName = "licenses_" + nowLocal.ToString("yyyyMMdd_HHmm") + ".xlsx";
+            var contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var bytes = BuildLicensesXlsx(exportRows);
+
+            var module = await GetDownloadModuleAsync();
+            var base64 = Convert.ToBase64String(bytes);
+
+            await module.InvokeVoidAsync("downloadFileFromBase64", fileName, contentType, base64);
+
+            Snackbar.Add(Txt("Msg_ExportDone", "Eksport zakończony."), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LicensesIndex] Export error.");
+            Snackbar.Add(Txt("Msg_ExportFailed", "Eksport nieudany. Spróbuj ponownie."), Severity.Error);
+        }
+        finally
+        {
+            _isExporting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<LicenseListRow> GetExportRows()
+    {
+        try
+        {
+            if (_grid?.FilteredItems != null)
+                return _grid.FilteredItems.Where(x => x != null).ToList();
+        }
+        catch
+        {
+        }
+
+        return (_filteredRows ?? new List<LicenseListRow>()).Where(x => x != null).ToList();
+    }
+
+    private static byte[] BuildLicensesXlsx(List<LicenseListRow> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Licenses");
+
+        ws.Cell(1, 1).Value = "Type";
+        ws.Cell(1, 2).Value = "Name";
+        ws.Cell(1, 3).Value = "Producer";
+        ws.Cell(1, 4).Value = "Model";
+        ws.Cell(1, 5).Value = "InventoryNo";
+        ws.Cell(1, 6).Value = "User";
+        ws.Cell(1, 7).Value = "SubscriptionStart";
+        ws.Cell(1, 8).Value = "SubscriptionEnd";
+        ws.Cell(1, 9).Value = "Status";
+
+        var r = 2;
+        foreach (var x in rows)
+        {
+            ws.Cell(r, 1).Value = (x.Type ?? string.Empty).Trim();
+            ws.Cell(r, 2).Value = (x.Name ?? string.Empty).Trim();
+            ws.Cell(r, 3).Value = (x.Producer ?? string.Empty).Trim();
+            ws.Cell(r, 4).Value = (x.Model ?? string.Empty).Trim();
+            ws.Cell(r, 5).Value = (x.InventoryNo ?? string.Empty).Trim();
+            ws.Cell(r, 6).Value = (x.User ?? string.Empty).Trim();
+
+            if (x.SubscriptionStarts.HasValue)
+            {
+                ws.Cell(r, 7).Value = x.SubscriptionStarts.Value.Date;
+                ws.Cell(r, 7).Style.DateFormat.Format = "yyyy-mm-dd";
+            }
+            else
+            {
+                ws.Cell(r, 7).Value = string.Empty;
+            }
+
+            if (x.SubscriptionEnds.HasValue)
+            {
+                ws.Cell(r, 8).Value = x.SubscriptionEnds.Value.Date;
+                ws.Cell(r, 8).Style.DateFormat.Format = "yyyy-mm-dd";
+            }
+            else
+            {
+                ws.Cell(r, 8).Value = string.Empty;
+            }
+
+            ws.Cell(r, 9).Value = (x.Status ?? string.Empty).Trim();
+            r++;
+        }
+
+        var lastRow = Math.Max(2, r - 1);
+        var range = ws.Range(1, 1, lastRow, 9);
+
+        ws.SheetView.FreezeRows(1);
+        range.SetAutoFilter();
+        ws.Row(1).Style.Font.Bold = true;
+
+        ws.Columns(1, 9).AdjustToContents();
+
+        ws.Column(2).Width = Math.Min(ws.Column(2).Width, 55);
+        ws.Column(6).Width = Math.Min(ws.Column(6).Width, 40);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private async Task<IJSObjectReference> GetDownloadModuleAsync()
+    {
+        if (_downloadModule != null)
+            return _downloadModule;
+
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownload.js");
+        return _downloadModule;
+    }
+
+    private string Txt(string key, string fallback)
+    {
+        var s = L[key];
+        return s.ResourceNotFound ? fallback : s.Value;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_downloadModule != null)
+                await _downloadModule.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+}

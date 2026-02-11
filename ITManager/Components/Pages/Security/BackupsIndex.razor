@@ -1,0 +1,246 @@
+﻿@namespace ITManager.Components.Pages.Security
+@page "/security/backups"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Security.Backups.View")]
+
+@* File: Components/Pages/Security/BackupsIndex.razor
+   Description: Security Center - backup statuses (read-only). Data from dbo.vw_backup_runs.
+                MVP version uses UTC (no TimeZoneService dependency).
+   Version: 1.01
+   Created: 2026-01-28
+   Updated:
+   - 2026-01-28 - FIX: use CurrentUserContextService.Can (no Has method in project).
+   - 2026-01-28 - FIX: MudSelectItem Value must be C# string expression (Value="@("Success")").
+   - 2026-01-28 - FIX: MudChip generic type for MudBlazor 8 (MudChip<string>).
+   - 2026-01-28 - CHANGE: removed TimeZoneService usage, display and filters in UTC (MVP).
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Services.Auth
+@using ITManager.Services.Security
+
+@inject IStringLocalizer<BackupsIndex> L
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+@inject BackupStatusService BackupStatusService
+
+<MudContainer MaxWidth="MaxWidth.False" Class="py-4">
+
+    <MudStack Spacing="2">
+
+        <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["SubtitleUtc"]</MudText>
+            </MudStack>
+
+            <MudStack Direction="Row" AlignItems="AlignItems.Center" Spacing="1">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="_loading">
+                    @L["Refresh"]
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        @if (!CurrentUserContextService.Can("Security.Backups.View"))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                @L["NoPermissions"]
+            </MudAlert>
+        }
+        else
+        {
+            <MudPaper Class="pa-3" Elevation="0">
+                <MudGrid Spacing="2">
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudDatePicker Label="@L["From"]" @bind-Date="_fromUtcDate" Disabled="_loading" />
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudDatePicker Label="@L["To"]" @bind-Date="_toUtcDate" Disabled="_loading" />
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudSelect T="string" Label="@L["Status"]" Dense="true" Clearable="true" @bind-Value="_status" Disabled="_loading">
+                            <MudSelectItem Value="@("Success")">@L["Status.Success"]</MudSelectItem>
+                            <MudSelectItem Value="@("Warning")">@L["Status.Warning"]</MudSelectItem>
+                            <MudSelectItem Value="@("Failed")">@L["Status.Failed"]</MudSelectItem>
+                            <MudSelectItem Value="@("Running")">@L["Status.Running"]</MudSelectItem>
+                            <MudSelectItem Value="@("Unknown")">@L["Status.Unknown"]</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudTextField Label="@L["JobSearch"]" @bind-Value="_jobSearch" Immediate="true" Disabled="_loading" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadAsync" Disabled="_loading">
+                            @L["ApplyFilters"]
+                        </MudButton>
+                        <MudButton Class="ml-2" Variant="Variant.Outlined" OnClick="ClearFilters" Disabled="_loading">
+                            @L["Clear"]
+                        </MudButton>
+                    </MudItem>
+
+                </MudGrid>
+            </MudPaper>
+
+            <MudPaper Class="pa-2" Elevation="0">
+
+                <div style="position: relative;">
+                    @if (_loading)
+                    {
+                        <MudOverlay Visible="true" DarkBackground="false" ZIndex="10">
+                            <MudProgressCircular Indeterminate="true" />
+                        </MudOverlay>
+                    }
+
+                    <MudDataGrid T="BackupStatusService.BackupRunRow"
+                                 Items="_rows"
+                                 Dense="true"
+                                 Hover="true"
+                                 FixedHeader="true"
+                                 Height="calc(100vh - 340px)">
+
+                        <Columns>
+                            <PropertyColumn Property="x => x.StartedUtc" Title="@L["StartedUtc"]">
+                                <CellTemplate>
+                                    @FormatUtc(context.Item.StartedUtc)
+                                </CellTemplate>
+                            </PropertyColumn>
+
+                            <PropertyColumn Property="x => x.Tool" Title="@L["Tool"]" />
+                            <PropertyColumn Property="x => x.JobName" Title="@L["Job"]" />
+                            <PropertyColumn Property="x => x.Target" Title="@L["Target"]" />
+
+                            <PropertyColumn Property="x => x.Status" Title="@L["Status"]">
+                                <CellTemplate>
+                                    @StatusChip(context.Item.Status)
+                                </CellTemplate>
+                            </PropertyColumn>
+
+                            <PropertyColumn Property="x => x.DurationSeconds" Title="@L["Duration"]">
+                                <CellTemplate>
+                                    @FormatDuration(context.Item.DurationSeconds)
+                                </CellTemplate>
+                            </PropertyColumn>
+
+                            <PropertyColumn Property="x => x.Message" Title="@L["Message"]" />
+                        </Columns>
+
+                    </MudDataGrid>
+                </div>
+
+            </MudPaper>
+        }
+
+    </MudStack>
+</MudContainer>
+
+@code {
+    private bool _loading;
+    private List<BackupStatusService.BackupRunRow> _rows = new();
+
+    private DateTime? _fromUtcDate;
+    private DateTime? _toUtcDate;
+    private string? _status;
+    private string? _jobSearch;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var nowUtc = DateTime.UtcNow;
+        _toUtcDate = nowUtc.Date;
+        _fromUtcDate = nowUtc.Date.AddDays(-14);
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!CurrentUserContextService.Can("Security.Backups.View"))
+            return;
+
+        _loading = true;
+        try
+        {
+            var fromDate = (_fromUtcDate ?? DateTime.UtcNow.Date.AddDays(-14)).Date;
+            var toDate = (_toUtcDate ?? DateTime.UtcNow.Date).Date;
+
+            if (toDate < fromDate)
+            {
+                Snackbar.Add(L["DateRangeInvalid"], Severity.Warning);
+                return;
+            }
+
+            var fromUtc = fromDate;
+            var toUtcExclusive = toDate.AddDays(1);
+
+            var data = await BackupStatusService.GetBackupRunsAsync(new BackupStatusService.BackupRunsQuery
+            {
+                FromUtc = fromUtc,
+                ToUtc = toUtcExclusive,
+                Status = string.IsNullOrWhiteSpace(_status) ? null : _status,
+                JobNameContains = string.IsNullOrWhiteSpace(_jobSearch) ? null : _jobSearch.Trim()
+            });
+
+            _rows = data.ToList();
+        }
+        catch
+        {
+            Snackbar.Add(L["LoadError"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ClearFilters()
+    {
+        _status = null;
+        _jobSearch = null;
+    }
+
+    private static string FormatUtc(DateTime utc)
+    {
+        return utc.ToString("yyyy-MM-dd HH:mm") + " UTC";
+    }
+
+    private static string FormatDuration(int? seconds)
+    {
+        if (seconds is null) return "";
+        var ts = TimeSpan.FromSeconds(seconds.Value);
+        if (ts.TotalHours >= 1) return $"{(int)ts.TotalHours}h {ts.Minutes}m";
+        if (ts.TotalMinutes >= 1) return $"{ts.Minutes}m {ts.Seconds}s";
+        return $"{ts.Seconds}s";
+    }
+
+    private RenderFragment StatusChip(string status) => builder =>
+    {
+        var (color, text) = status switch
+        {
+            "Success" => (Color.Success, L["Status.Success"].Value),
+            "Warning" => (Color.Warning, L["Status.Warning"].Value),
+            "Failed" => (Color.Error, L["Status.Failed"].Value),
+            "Running" => (Color.Info, L["Status.Running"].Value),
+            _ => (Color.Secondary, L["Status.Unknown"].Value)
+        };
+
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddAttribute(1, "Color", color);
+        builder.AddAttribute(2, "Variant", Variant.Outlined);
+        builder.AddAttribute(3, "Size", Size.Small);
+        builder.AddAttribute(4, "Label", true);
+        builder.AddAttribute(5, "T", typeof(string));
+        builder.AddAttribute(6, "ChildContent", (RenderFragment)(b => b.AddContent(7, text)));
+        builder.CloseComponent();
+    };
+}

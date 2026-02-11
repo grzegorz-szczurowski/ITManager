@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Ui.LoadingPortal" xml:space="preserve">
+    <value>Loading portal</value>
+  </data>
+
+	<data name="Language.EN" xml:space="preserve">
+    <value>EN</value>
+  </data>
+	<data name="Language.PL" xml:space="preserve">
+    <value>PL</value>
+  </data>
+
+	<data name="UnknownUser" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+
+	<data name="AppTitle" xml:space="preserve">
+    <value>ITManager</value>
+  </data>
+
+	<data name="LogoAlt" xml:space="preserve">
+    <value>Tristone logo</value>
+  </data>
+
+	<data name="ToggleThemeTitle" xml:space="preserve">
+    <value>Toggle theme</value>
+  </data>
+
+	<data name="MyAccountTooltip" xml:space="preserve">
+    <value>My account</value>
+  </data>
+
+	<data name="Errors.ReadDrawerState" xml:space="preserve">
+    <value>Cannot read drawer state</value>
+  </data>
+	<data name="Errors.SaveDrawerState" xml:space="preserve">
+    <value>Cannot save drawer state</value>
+  </data>
+
+	<data name="Errors.ReadDarkMode" xml:space="preserve">
+    <value>Cannot read dark mode</value>
+  </data>
+	<data name="Errors.SaveDarkMode" xml:space="preserve">
+    <value>Cannot save dark mode</value>
+  </data>
+
+	<data name="Errors.ChangeLanguage" xml:space="preserve">
+    <value>Cannot change language</value>
+  </data>
+
+	<data name="Errors.RegisterVisit" xml:space="preserve">
+    <value>Cannot register visit</value>
+  </data>
+</root>

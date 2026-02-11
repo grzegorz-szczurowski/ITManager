@@ -1,0 +1,45 @@
+﻿@using Microsoft.AspNetCore.Components.Routing
+@using ITManager.Components.Layout
+
+@* File: Components/Routes.razor
+   Description: Routing aplikacji ITManager.(Windows only).
+   Updated: 2026-01-12 - FIX: nie renderuj MainLayout drugi raz w NotAuthorized/Authorizing (MudBlazor Section collision).
+*@
+
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="@routeData"
+                            DefaultLayout="@typeof(MainLayout)">
+
+            <NotAuthorized Context="authState">
+                <div style="padding:24px; max-width:900px;">
+                    @if (authState?.User?.Identity?.IsAuthenticated ?? false)
+                    {
+                        <h3>Brak dostępu</h3>
+                        <p>Jesteś zalogowany, ale nie masz wymaganych uprawnień do tej strony.</p>
+                        <p>Skontaktuj się z IT, aby nadać uprawnienie wymagane przez podstronę.</p>
+                    }
+                    else
+                    {
+                        <h3>Brak dostępu</h3>
+                        <p>Portal wymaga zalogowania kontem domenowym.</p>
+                        <p>Jeśli jesteś w domenie i nadal to widzisz, sprawdź ustawienia przeglądarki dla strefy Intranet.</p>
+                    }
+                </div>
+            </NotAuthorized>
+
+            <Authorizing>
+                <div style="padding:24px; display:flex; align-items:center; gap:12px;">
+                    <span>Sprawdzanie dostępu</span>
+                </div>
+            </Authorizing>
+
+        </AuthorizeRouteView>
+    </Found>
+
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <p>Nie znaleziono strony.</p>
+        </LayoutView>
+    </NotFound>
+</Router>

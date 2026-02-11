@@ -1,0 +1,140 @@
+﻿@page "/emergency"
+@rendermode InteractiveServer
+
+@using System
+@using System.Collections.Generic
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Services.Auth
+@using Microsoft.AspNetCore.Components
+
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+
+@* File: Components/Pages/Emergency.razor
+   Description: Strona z kontaktami alarmowymi (pogotowie, policja itp.).
+   RBAC: wymaga permission Contact.View.
+   Created: 2025-12-05
+   Updated: 2026-01-09 - RBAC: Contact.View jako jedyne wymaganie dostępu, blokada widoku gdy brak uprawnień. *@
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudText Typo="Typo.h5">Numery alarmowe</MudText>
+        </MudStack>
+
+        @if (_isLoading)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+                <MudProgressCircular Indeterminate="true" Size="Size.Medium" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Ładowanie...</MudText>
+            </MudStack>
+        }
+        else if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                Brak uprawnień do podglądu kontaktów alarmowych.
+            </MudAlert>
+        }
+        else
+        {
+            <MudDataGrid T="EmergencyRow"
+                         Items="_rows"
+                         Hover="true"
+                         Dense="true"
+                         ReadOnly="true"
+                         Bordered="false"
+                         Striped="true"
+                         Elevation="0"
+                         Breakpoint="Breakpoint.Sm">
+
+                <Columns>
+
+                    <PropertyColumn Property="@(x => x.Number)"
+                                    Title="Numer alarmowy"
+                                    Sortable="true"
+                                    HeaderStyle="width:170px; max-width:170px;"
+                                    CellStyle="width:170px; max-width:170px; white-space:nowrap;" />
+
+                    <PropertyColumn Property="@(x => x.Service)"
+                                    Title="Służba"
+                                    Sortable="true" />
+
+                    <PropertyColumn Property="@(x => x.Notes)"
+                                    Title="Uwagi"
+                                    Sortable="false" />
+
+                </Columns>
+
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="px-2 py-2">
+                        Brak danych do wyświetlenia.
+                    </MudText>
+                </NoRecordsContent>
+
+            </MudDataGrid>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+@code
+{
+    private const string PermContactView = "Contact.View";
+
+    private bool _isLoading = true;
+    private bool _canView;
+
+    public sealed class EmergencyRow
+    {
+        public string Number { get; set; } = string.Empty;
+        public string Service { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+    }
+
+    private readonly List<EmergencyRow> _rows = new()
+    {
+        new EmergencyRow { Number = "112", Service = "Centrum Powiadamiania Ratunkowego", Notes = "" },
+        new EmergencyRow { Number = "999", Service = "Pogotowie Ratunkowe", Notes = "" },
+        new EmergencyRow { Number = "998", Service = "Straż Pożarna", Notes = "" },
+        new EmergencyRow { Number = "997", Service = "Policja", Notes = "" },
+        new EmergencyRow { Number = "986", Service = "Straż Miejska", Notes = "" },
+        new EmergencyRow { Number = "994", Service = "Pogotowie Wodno-kanalizacyjne", Notes = "" },
+        new EmergencyRow { Number = "993", Service = "Pogotowie Ciepłownicze", Notes = "" },
+        new EmergencyRow { Number = "992", Service = "Pogotowie Gazowe", Notes = "" },
+        new EmergencyRow { Number = "991", Service = "Pogotowie Energetyczne", Notes = "" }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            if (!ctx.IsAuthenticated || ctx.IsActive != true)
+            {
+                _canView = false;
+                NavigationManager.NavigateTo("/", replace: true);
+                return;
+            }
+
+            _canView = ctx.Has(PermContactView);
+            if (!_canView)
+            {
+                // Nie przekierowujemy na siłę, bo to strona "informacyjna".
+                // Pokazujemy czytelny alert w UI.
+                return;
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+}

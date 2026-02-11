@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="metadata">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" />
+							</xsd:sequence>
+							<xsd:attribute name="name" use="required" type="xsd:string" />
+							<xsd:attribute name="type" type="xsd:string" />
+							<xsd:attribute name="mimetype" type="xsd:string" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="assembly">
+						<xsd:complexType>
+							<xsd:attribute name="alias" type="xsd:string" />
+							<xsd:attribute name="name" type="xsd:string" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Prints</value>
+  </data>
+	<data name="Subtitle" xml:space="preserve">
+    <value>Print statistics and costs for the selected period</value>
+  </data>
+	<data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+	<data name="Loading" xml:space="preserve">
+    <value>Loading</value>
+  </data>
+
+	<data name="NoAccess" xml:space="preserve">
+    <value>No permission: {0}</value>
+  </data>
+
+	<data name="DateRangeTitle" xml:space="preserve">
+    <value>Date range</value>
+  </data>
+	<data name="From" xml:space="preserve">
+    <value>From</value>
+  </data>
+	<data name="To" xml:space="preserve">
+    <value>To</value>
+  </data>
+
+	<data name="CompareLabel" xml:space="preserve">
+    <value>Compare with previous period</value>
+  </data>
+	<data name="ComparePeriods" xml:space="preserve">
+    <value>Current: {0} to {1}. Previous: {2} to {3}.</value>
+  </data>
+
+	<data name="LocationsTitle" xml:space="preserve">
+    <value>Locations</value>
+  </data>
+	<data name="NoLocations" xml:space="preserve">
+    <value>No locations available.</value>
+  </data>
+
+	<data name="PrintersTitle" xml:space="preserve">
+    <value>Printers</value>
+  </data>
+	<data name="NoDataForFilters" xml:space="preserve">
+    <value>No data for the selected filters.</value>
+  </data>
+
+	<data name="Col_Hostname" xml:space="preserve">
+    <value>Host</value>
+  </data>
+	<data name="Col_Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Col_Total" xml:space="preserve">
+    <value>Total</value>
+  </data>
+	<data name="Col_Mono" xml:space="preserve">
+    <value>Mono</value>
+  </data>
+	<data name="Col_Color" xml:space="preserve">
+    <value>Color</value>
+  </data>
+	<data name="Col_Cost" xml:space="preserve">
+    <value>Cost</value>
+  </data>
+	<data name="Col_Trend" xml:space="preserve">
+    <value>Trend</value>
+  </data>
+
+	<data name="CurrencyPLN" xml:space="preserve">
+    <value>PLN</value>
+  </data>
+
+	<data name="NA" xml:space="preserve">
+    <value>N/A</value>
+  </data>
+
+	<data name="InfinityLabel" xml:space="preserve">
+    <value>∞</value>
+  </data>
+
+	<data name="SummaryRow" xml:space="preserve">
+    <value>Summary</value>
+  </data>
+
+	<data name="SelectedPrinter" xml:space="preserve">
+    <value>Selected printer: {0} ({1})</value>
+  </data>
+	<data name="AllPrinters" xml:space="preserve">
+    <value>All printers</value>
+  </data>
+
+	<data name="Kpi_TotalPages" xml:space="preserve">
+    <value>Total pages</value>
+  </data>
+	<data name="Kpi_Mono" xml:space="preserve">
+    <value>Mono pages</value>
+  </data>
+	<data name="Kpi_Color" xml:space="preserve">
+    <value>Color pages</value>
+  </data>
+
+	<data name="PrevPeriodValue" xml:space="preserve">
+    <value>Previous period: {0}</value>
+  </data>
+
+	<data name="ErrorReport" xml:space="preserve">
+    <value>Failed to load the report.</value>
+  </data>
+	<data name="ErrorLocations" xml:space="preserve">
+    <value>Failed to load locations.</value>
+  </data>
+</root>

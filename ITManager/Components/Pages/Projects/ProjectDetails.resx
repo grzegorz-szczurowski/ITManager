@@ -1,0 +1,168 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="NoCreatePermission" xml:space="preserve"><value>You do not have permission to create projects.</value></data>
+	<data name="ProjectNotFoundOrNoAccess" xml:space="preserve"><value>Project not found or you do not have access.</value></data>
+
+	<data name="HeaderNewProject" xml:space="preserve"><value>New project</value></data>
+	<data name="HeaderProject" xml:space="preserve"><value>Project</value></data>
+	<data name="CreateMode" xml:space="preserve"><value>Create mode</value></data>
+	<data name="ProjectsLabel" xml:space="preserve"><value>Projects</value></data>
+
+	<data name="EditButton" xml:space="preserve"><value>Edit</value></data>
+	<data name="SaveButton" xml:space="preserve"><value>Save</value></data>
+	<data name="CancelButton" xml:space="preserve"><value>Cancel</value></data>
+
+	<data name="Loading" xml:space="preserve"><value>Loading...</value></data>
+	<data name="Saving" xml:space="preserve"><value>Saving...</value></data>
+
+	<data name="NoPermissions" xml:space="preserve"><value>No permissions.</value></data>
+	<data name="SaveFailedError" xml:space="preserve"><value>Save failed: {0}</value></data>
+	<data name="ProjectCreatedSuccess" xml:space="preserve"><value>Project created.</value></data>
+	<data name="ProjectUpdatedSuccess" xml:space="preserve"><value>Project saved.</value></data>
+
+	<data name="LookupLoadFailedWarning" xml:space="preserve"><value>Failed to load lookups: {0}. Using fallback values.</value></data>
+
+	<data name="StatusTitle" xml:space="preserve"><value>Status</value></data>
+	<data name="StatusQuestion" xml:space="preserve"><value>What is the business stage of this project?</value></data>
+	<data name="StageFormat" xml:space="preserve"><value>Stage: {0}</value></data>
+
+	<data name="Stage_Draft" xml:space="preserve"><value>Draft</value></data>
+	<data name="Stage_Planning" xml:space="preserve"><value>Planning</value></data>
+	<data name="Stage_Execution" xml:space="preserve"><value>Execution</value></data>
+	<data name="Stage_Validation" xml:space="preserve"><value>Validation</value></data>
+	<data name="Stage_OnHold" xml:space="preserve"><value>On hold</value></data>
+	<data name="Stage_Done" xml:space="preserve"><value>Done</value></data>
+	<data name="Stage_Unknown" xml:space="preserve"><value>Unknown</value></data>
+
+	<data name="StatusExample_Draft" xml:space="preserve"><value>Example: idea captured, no plan and no tasks yet.</value></data>
+	<data name="StatusExample_Planning" xml:space="preserve"><value>Example: requirements, scope, plan, and owner are defined.</value></data>
+	<data name="StatusExample_Execution" xml:space="preserve"><value>Example: work is in progress, tickets exist and are being done.</value></data>
+	<data name="StatusExample_Validation" xml:space="preserve"><value>Example: ready for testing, review, or acceptance.</value></data>
+	<data name="StatusExample_OnHold" xml:space="preserve"><value>Example: paused with a clear reason.</value></data>
+	<data name="StatusExample_Done" xml:space="preserve"><value>Example: delivered and accepted, work completed.</value></data>
+	<data name="StatusExample_Default" xml:space="preserve"><value>Example: choose the closest matching stage.</value></data>
+
+	<data name="ScoringTitle" xml:space="preserve"><value>Scoring</value></data>
+	<data name="ScoringGoal" xml:space="preserve"><value>The score helps compare projects and set priorities.</value></data>
+	<data name="ScoreFormat" xml:space="preserve"><value>Score: {0}</value></data>
+
+	<data name="ImpactTitle" xml:space="preserve"><value>Impact</value></data>
+	<data name="ImpactQuestion" xml:space="preserve"><value>How big is the impact on business or risk?</value></data>
+	<data name="ImpactNumericLabel" xml:space="preserve"><value>Impact (1-5)</value></data>
+
+	<data name="UrgencyTitle" xml:space="preserve"><value>Urgency</value></data>
+	<data name="UrgencyQuestion" xml:space="preserve"><value>How soon do we need the next step?</value></data>
+	<data name="UrgencyNumericLabel" xml:space="preserve"><value>Urgency (1-5)</value></data>
+
+	<data name="ScopeTitle" xml:space="preserve"><value>Scope</value></data>
+	<data name="ScopeQuestion" xml:space="preserve"><value>How big is the scope of changes and the number of stakeholders?</value></data>
+	<data name="ScopeNumericLabel" xml:space="preserve"><value>Scope (1-3)</value></data>
+
+	<data name="DelayTitle" xml:space="preserve"><value>Cost of delay</value></data>
+	<data name="DelayQuestion" xml:space="preserve"><value>How painful is delaying this project?</value></data>
+	<data name="DelayNumericLabel" xml:space="preserve"><value>Cost of delay (1-3)</value></data>
+
+	<data name="EffortTitle" xml:space="preserve"><value>Effort</value></data>
+	<data name="EffortQuestion" xml:space="preserve"><value>How much work and resources does it require?</value></data>
+	<data name="EffortNumericLabel" xml:space="preserve"><value>Effort (1-3)</value></data>
+
+	<data name="ImpactExample_Default" xml:space="preserve"><value>Example: choose the impact level.</value></data>
+	<data name="ImpactExample_Critical" xml:space="preserve"><value>Example: critical risk or process stoppage.</value></data>
+	<data name="ImpactExample_VeryHigh" xml:space="preserve"><value>Example: major impact on cost, quality, or continuity.</value></data>
+	<data name="ImpactExample_High" xml:space="preserve"><value>Example: noticeable impact on an area or KPI.</value></data>
+	<data name="ImpactExample_Medium" xml:space="preserve"><value>Example: local improvement, moderate effect.</value></data>
+	<data name="ImpactExample_Low" xml:space="preserve"><value>Example: minor improvement or small gain.</value></data>
+	<data name="ImpactExample_Fallback" xml:space="preserve"><value>Example: choose the closest option.</value></data>
+
+	<data name="UrgencyExample_Default" xml:space="preserve"><value>Example: choose the urgency level.</value></data>
+	<data name="UrgencyExample_Immediate" xml:space="preserve"><value>Example: immediate, today or tomorrow.</value></data>
+	<data name="UrgencyExample_ASAP" xml:space="preserve"><value>Example: as soon as possible, within days.</value></data>
+	<data name="UrgencyExample_High" xml:space="preserve"><value>Example: this week or very soon.</value></data>
+	<data name="UrgencyExample_Normal" xml:space="preserve"><value>Example: no strong pressure, but should be planned.</value></data>
+	<data name="UrgencyExample_Low" xml:space="preserve"><value>Example: can wait.</value></data>
+	<data name="UrgencyExample_Fallback" xml:space="preserve"><value>Example: choose the closest option.</value></data>
+
+	<data name="ScopeExample_Default" xml:space="preserve"><value>Example: choose the scope size.</value></data>
+	<data name="ScopeExample_Large" xml:space="preserve"><value>Example: many teams, dependencies, and changes.</value></data>
+	<data name="ScopeExample_Medium" xml:space="preserve"><value>Example: a few areas or modules.</value></data>
+	<data name="ScopeExample_Small" xml:space="preserve"><value>Example: one change, one area.</value></data>
+	<data name="ScopeExample_Fallback" xml:space="preserve"><value>Example: choose the closest option.</value></data>
+
+	<data name="DelayExample_Default" xml:space="preserve"><value>Example: choose the cost of delay.</value></data>
+	<data name="DelayExample_High" xml:space="preserve"><value>Example: delay creates real cost or risk.</value></data>
+	<data name="DelayExample_Medium" xml:space="preserve"><value>Example: delay reduces comfort or efficiency.</value></data>
+	<data name="DelayExample_Low" xml:space="preserve"><value>Example: delay has little impact.</value></data>
+	<data name="DelayExample_Fallback" xml:space="preserve"><value>Example: choose the closest option.</value></data>
+
+	<data name="EffortExample_Default" xml:space="preserve"><value>Example: choose the effort.</value></data>
+	<data name="EffortExample_Large" xml:space="preserve"><value>Example: large project with many dependencies.</value></data>
+	<data name="EffortExample_Medium" xml:space="preserve"><value>Example: several tasks or a few days of work.</value></data>
+	<data name="EffortExample_Small" xml:space="preserve"><value>Example: quick change, low effort.</value></data>
+	<data name="EffortExample_Fallback" xml:space="preserve"><value>Example: choose the closest option.</value></data>
+
+	<data name="BusinessOwnerTitle" xml:space="preserve"><value>Business owner</value></data>
+	<data name="OwnerQuestion" xml:space="preserve"><value>Who is responsible for decisions and priority on the business side?</value></data>
+	<data name="OwnerExample" xml:space="preserve"><value>Example: area manager, process owner, sponsor.</value></data>
+	<data name="OwnerLabel" xml:space="preserve"><value>Owner</value></data>
+
+	<data name="TicketsTitle" xml:space="preserve"><value>Tickets</value></data>
+	<data name="TicketsQuestion" xml:space="preserve"><value>Does the ticket list reflect the full scope of work?</value></data>
+	<data name="TicketsExample" xml:space="preserve"><value>Example: tasks, technical work, testing, documentation.</value></data>
+
+	<data name="WorkPointsFormat" xml:space="preserve"><value>Work points: {0}/{1}</value></data>
+	<data name="TicketsCountFormat" xml:space="preserve"><value>Tickets: {0}/{1}</value></data>
+	<data name="NoTicketsLinkedYet" xml:space="preserve"><value>No linked tickets yet.</value></data>
+	<data name="ProgressStartsAfterAddingTickets" xml:space="preserve"><value>Progress will be visible after adding tickets to the project.</value></data>
+
+	<data name="DatesTitle" xml:space="preserve"><value>Dates</value></data>
+	<data name="DatesQuestion" xml:space="preserve"><value>When do we start and what is the target end date?</value></data>
+	<data name="DatesExample" xml:space="preserve"><value>Example: planned start and deadline.</value></data>
+	<data name="PlannedStartLabel" xml:space="preserve"><value>Planned start</value></data>
+	<data name="DeadlineLabel" xml:space="preserve"><value>Deadline</value></data>
+	<data name="StartDateFormat" xml:space="preserve"><value>Start: {0}</value></data>
+	<data name="DeadlineDateFormat" xml:space="preserve"><value>Deadline: {0}</value></data>
+
+	<data name="ActiveTitle" xml:space="preserve"><value>Active</value></data>
+	<data name="ActiveQuestion" xml:space="preserve"><value>Is the project active and still worth pursuing?</value></data>
+	<data name="ActiveSwitchLabel" xml:space="preserve"><value>Active</value></data>
+	<data name="ActiveExample_True" xml:space="preserve"><value>Example: in progress or ready to work on.</value></data>
+	<data name="ActiveExample_False" xml:space="preserve"><value>Example: closed or permanently paused.</value></data>
+
+	<data name="Yes" xml:space="preserve"><value>Yes</value></data>
+	<data name="No" xml:space="preserve"><value>No</value></data>
+
+	<data name="NameLabel" xml:space="preserve"><value>Name</value></data>
+	<data name="DescriptionLabel" xml:space="preserve"><value>Description</value></data>
+
+	<data name="LastUpdateNoteLabel" xml:space="preserve"><value>Update note</value></data>
+	<data name="LastUpdateNoteRequiredHint" xml:space="preserve"><value>At this stage a short note is required explaining why the status was set to this stage.</value></data>
+
+	<data name="AddButton" xml:space="preserve"><value>Add</value></data>
+	<data name="LinkButton" xml:space="preserve"><value>Link</value></data>
+	<data name="SearchTicketsPlaceholder" xml:space="preserve"><value>Search tickets...</value></data>
+
+	<data name="AddTicketNotReadyInfo" xml:space="preserve"><value>Redirecting to ticket creation. The project link will be filled in.</value></data>
+	<data name="LinkTicketsDialogTitle" xml:space="preserve"><value>Link tickets to project</value></data>
+
+	<data name="TicketsColId" xml:space="preserve"><value>ID</value></data>
+	<data name="TicketsColTitle" xml:space="preserve"><value>Title</value></data>
+	<data name="TicketsColStatus" xml:space="preserve"><value>Status</value></data>
+	<data name="TicketsColPriority" xml:space="preserve"><value>Priority</value></data>
+	<data name="TicketsColAssigned" xml:space="preserve"><value>Assigned</value></data>
+	<data name="TicketsColUpdated" xml:space="preserve"><value>Updated</value></data>
+
+	<data name="NoTickets" xml:space="preserve"><value>No tickets to display.</value></data>
+</root>

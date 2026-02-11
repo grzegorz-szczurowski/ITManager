@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title.ContactData" xml:space="preserve">
+    <value>Contact details</value>
+  </data>
+
+	<data name="Info.FillOnlyChangedFields" xml:space="preserve">
+    <value>Fill in only the fields you want to change. Empty fields will be left unchanged.</value>
+  </data>
+	<data name="Info.ChangesSentToAdmin" xml:space="preserve">
+    <value>Your changes will be sent to the administrator.</value>
+  </data>
+
+	<data name="Loading.ContactData" xml:space="preserve">
+    <value>Loading data</value>
+  </data>
+
+	<data name="Warning.DomainOnly" xml:space="preserve">
+    <value>This page is available only when signed in with domain authentication.</value>
+  </data>
+	<data name="Warning.ContactNotFound" xml:space="preserve">
+    <value>Your contact record was not found in the contacts database. Please contact IT.</value>
+  </data>
+
+	<data name="Section.NewData" xml:space="preserve">
+    <value>New details</value>
+  </data>
+	<data name="Section.AdditionalInfoForAdmin" xml:space="preserve">
+    <value>Additional information for the administrator</value>
+  </data>
+
+	<data name="Field.NewFirstName.Label" xml:space="preserve">
+    <value>New first name</value>
+  </data>
+	<data name="Field.NewLastName.Label" xml:space="preserve">
+    <value>New last name</value>
+  </data>
+	<data name="Field.NewDepartment.Label" xml:space="preserve">
+    <value>New department</value>
+  </data>
+	<data name="Field.NewJobTitle.Label" xml:space="preserve">
+    <value>New job title</value>
+  </data>
+
+	<data name="Field.NewInternalPhone.Label" xml:space="preserve">
+    <value>New internal phone</value>
+  </data>
+	<data name="Field.NewLandlinePhone.Label" xml:space="preserve">
+    <value>New landline phone</value>
+  </data>
+	<data name="Field.NewMobilePhone.Label" xml:space="preserve">
+    <value>New mobile phone</value>
+  </data>
+	<data name="Field.NewEmail.Label" xml:space="preserve">
+    <value>New email</value>
+  </data>
+
+	<data name="Field.Message.Label" xml:space="preserve">
+    <value>Message</value>
+  </data>
+	<data name="Field.Message.Placeholder" xml:space="preserve">
+    <value>For example, since when the new details apply</value>
+  </data>
+
+	<data name="Button.Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+	<data name="Button.Send" xml:space="preserve">
+    <value>Send</value>
+  </data>
+
+	<data name="Snackbar.UpdateRequestSent" xml:space="preserve">
+    <value>The update request has been sent to the administrator.</value>
+  </data>
+	<data name="Snackbar.SendRequestError" xml:space="preserve">
+    <value>An error occurred while sending the request.</value>
+  </data>
+
+	<data name="Error.ResolveUserIdFailed" xml:space="preserve">
+    <value>Could not determine your user identifier in the system.</value>
+  </data>
+	<data name="Error.LoadContactFailed" xml:space="preserve">
+    <value>An error occurred while loading the data.</value>
+  </data>
+	<data name="Error.MissingLoggedUserId" xml:space="preserve">
+    <value>Missing logged in user identifier. Refresh the page and try again.</value>
+  </data>
+	<data name="Error.SendRequestFailed" xml:space="preserve">
+    <value>Could not send the update request.</value>
+  </data>
+</root>

@@ -1,0 +1,318 @@
+﻿@page "/admin/users-roles"
+@rendermode InteractiveServer
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject UserRolesAdminService UserRolesAdminService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+
+@* File: Components/Pages/UsersRolesAdmin.razor
+   Description: Admin: przypisywanie ról do użytkowników (multi-role) w dbo.UserRoles.
+                Lista userów: dbo.vw_users_roles_agg. Lista ról: dbo.Roles.
+                RBAC: Permissions.Manage.
+   Version: 1.03
+   Created: 2025-12-25
+   Change log:
+   - 1.00 (2025-12-25) Initial.
+   - 1.01 (2025-12-25) Uproszczenie UI: usunięto wyszukiwarkę ról, akcje masowe, kolumny Name i Active.
+   - 1.02 (2026-01-09) RBAC new: gate tylko po ctx.Has("Permissions.Manage"), redirect dla braku dostępu, twarde blokady akcji.
+   - 1.03 (2026-01-26) UX: dodano ramki (Outlined) dla sekcji Users i Roles.
+*@
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h5">Users and roles</MudText>
+                <MudText Typo="Typo.subtitle2" Style="opacity:0.8;">Zarządzanie rolami użytkowników (multi-role)</MudText>
+            </MudStack>
+
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@_loading"
+                       OnClick="ReloadAsync">
+                Refresh
+            </MudButton>
+        </MudStack>
+
+        @if (!_canManage)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                Brak uprawnień do zarządzania rolami użytkowników.
+            </MudAlert>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(_loadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                    @_loadError
+                </MudAlert>
+            }
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="4" lg="3">
+                    <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">Users</MudText>
+
+                        <MudTextField @bind-Value="_userSearch"
+                                      Placeholder="Szukaj usera (display name, role)"
+                                      Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.Search"
+                                      Immediate="true"
+                                      Margin="Margin.Dense"
+                                      Disabled="@_loading" />
+
+                        <MudDivider Class="my-2" />
+
+                        <MudList T="UserRolesAdminService.UserAggRow" Dense="true">
+                            @foreach (var u in FilteredUsers())
+                            {
+                                <MudListItem T="UserRolesAdminService.UserAggRow"
+                                             @key="u.UserId"
+                                             Text="@GetUserListText(u)"
+                                             Selected="@(u.UserId == _selectedUserId)"
+                                             Disabled="@_loading"
+                                             OnClick="@(async () => await SelectUserAsync(u.UserId))"
+                                             Style="@GetUserStyle(u.UserId)" />
+                            }
+                        </MudList>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="8" lg="9">
+                    <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                            <MudText Typo="Typo.subtitle1">Roles</MudText>
+                            <MudSpacer />
+
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       Disabled="@(!_canManage || _loading || _selectedUserId <= 0)"
+                                       OnClick="SaveAsync">
+                                Save
+                            </MudButton>
+                        </MudStack>
+
+                        @if (_selectedUserId <= 0)
+                        {
+                            <MudText Typo="Typo.body2">Wybierz usera z lewej strony.</MudText>
+                        }
+                        else
+                        {
+                            <MudTable T="RoleVm"
+                                      Items="_roleVms"
+                                      Dense="true"
+                                      Hover="true"
+                                      Elevation="0"
+                                      Loading="@_loading">
+
+                                <HeaderContent>
+                                    <MudTh Style="width:80px; text-align:center;">On</MudTh>
+                                    <MudTh>Role</MudTh>
+                                </HeaderContent>
+
+                                <RowTemplate>
+                                    <MudTd Style="width:80px; text-align:center;">
+                                        <MudCheckBox T="bool"
+                                                     @bind-Value="context.Assigned"
+                                                     Disabled="@(!_canManage || _loading)" />
+                                    </MudTd>
+                                    <MudTd>@context.DisplayName</MudTd>
+                                </RowTemplate>
+
+                                <NoRecordsContent>
+                                    <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                        Brak ról do wyświetlenia.
+                                    </MudText>
+                                </NoRecordsContent>
+
+                            </MudTable>
+                        }
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        }
+    </MudStack>
+</MudPaper>
+
+@code
+{
+    private const string PermManage = "Admin.Permissions.Manage";
+
+    private bool _loading;
+    private bool _canManage;
+    private string _loadError = string.Empty;
+
+    private List<UserRolesAdminService.UserAggRow> _users = new();
+    private List<UserRolesAdminService.RoleRow> _roles = new();
+
+    private int _selectedUserId;
+    private string _userSearch = string.Empty;
+
+    private List<RoleVm> _roleVms = new();
+
+    private sealed class RoleVm
+    {
+        public int RoleId { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public bool Assigned { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        if (!ctx.IsAuthenticated || ctx.IsActive != true || !ctx.Has(PermManage))
+        {
+            _canManage = false;
+            NavigationManager.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _canManage = true;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_canManage)
+            return;
+
+        _loading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            _users = await UserRolesAdminService.GetUsersAsync();
+
+            // Role do UI: tylko aktywne
+            _roles = await UserRolesAdminService.GetRolesAsync(onlyActive: true);
+
+            if (_selectedUserId <= 0 && _users.Count > 0)
+                await SelectUserAsync(_users[0].UserId);
+            else if (_selectedUserId > 0)
+                await SelectUserAsync(_selectedUserId);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UsersRolesAdmin] Reload ERROR: {ex}");
+            _loadError = "Błąd podczas ładowania danych.";
+            _users = new();
+            _roles = new();
+            _roleVms = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IEnumerable<UserRolesAdminService.UserAggRow> FilteredUsers()
+    {
+        if (string.IsNullOrWhiteSpace(_userSearch))
+            return _users;
+
+        var s = _userSearch.Trim();
+
+        return _users.Where(u =>
+            (!string.IsNullOrWhiteSpace(u.UserDisplayName) && u.UserDisplayName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(u.RolesCsv) && u.RolesCsv.Contains(s, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task SelectUserAsync(int userId)
+    {
+        if (!_canManage || userId <= 0)
+            return;
+
+        _selectedUserId = userId;
+        _loading = true;
+
+        try
+        {
+            var assignedRoleIds = await UserRolesAdminService.GetUserRoleIdsAsync(userId);
+
+            _roleVms = (_roles ?? new())
+                .OrderBy(r => r.SortOrder)
+                .ThenBy(r => string.IsNullOrWhiteSpace(r.DisplayName) ? r.Name : r.DisplayName)
+                .ThenBy(r => r.Name)
+                .Select(r => new RoleVm
+                {
+                    RoleId = r.RoleId,
+                    DisplayName = string.IsNullOrWhiteSpace(r.DisplayName) ? r.Name : r.DisplayName,
+                    SortOrder = r.SortOrder,
+                    Assigned = assignedRoleIds.Contains(r.RoleId)
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UsersRolesAdmin] SelectUser ERROR: {ex}");
+            Snackbar.Add("Nie udało się wczytać ról usera.", Severity.Error);
+            _roleVms = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_canManage || _selectedUserId <= 0)
+            return;
+
+        _loading = true;
+
+        try
+        {
+            var roleIds = _roleVms.Where(x => x.Assigned).Select(x => x.RoleId).ToList();
+            await UserRolesAdminService.ReplaceUserRolesAsync(_selectedUserId, roleIds);
+
+            Snackbar.Add("Zapisano role użytkownika.", Severity.Success);
+
+            await ReloadAsync();
+            await SelectUserAsync(_selectedUserId);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add("Brak uprawnień do zapisu.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UsersRolesAdmin] Save ERROR: {ex}");
+            Snackbar.Add("Nie udało się zapisać zmian.", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string GetUserListText(UserRolesAdminService.UserAggRow u)
+    {
+        var active = u.UserIsActive ? "" : " (inactive)";
+        var roles = string.IsNullOrWhiteSpace(u.RolesCsv) ? "-" : u.RolesCsv;
+        return $"{u.UserDisplayName}{active} | {roles}";
+    }
+
+    private string GetUserStyle(int userId)
+    {
+        if (userId == _selectedUserId)
+            return "border-left:4px solid var(--mud-palette-primary); padding-left:10px; font-weight:600;";
+
+        return "padding-left:14px;";
+    }
+}

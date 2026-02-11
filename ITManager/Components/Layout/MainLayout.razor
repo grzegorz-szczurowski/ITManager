@@ -1,0 +1,845 @@
+﻿@using System
+@using System.Globalization
+@using System.Linq
+@using System.Net
+@using System.Threading
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Localization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+
+@inject IJSRuntime JS
+@inject IHttpContextAccessor HttpContextAccessor
+@inject ILogger<MainLayout> Logger
+@inject ContactsService ContactsService
+@inject TicketsService TicketsService
+@inject NavigationManager Navigation
+@inject CurrentUserContextService CurrentUserContextService
+@inject IStringLocalizer<MainLayout> L
+
+@* File: Components/Layout/MainLayout.razor
+   Description: Layout z drawerem, AppBar i przełącznikiem trybu ciemnego.
+   Updated: 2026-01-07 - UX: AppBar sticky (nagłówek nieruchomy), scroll naturalny strony, drawer zawsze widoczny.
+   Updated: 2026-01-09 - Windows only: usunięcie fallback "Guest" dla niezalogowanych, wizyty rejestrowane tylko dla auth.
+   Updated: 2026-01-18 - i18n: tłumaczenia tekstów UI (loading, język, tooltipy, błędy).
+   Updated: 2026-01-25 - wersja 1.14:
+     - RBAC: jeśli Windows auth ok, ale brak dostępu aplikacyjnego (HasAccess=false), nie renderuj @Body.
+     - Logging: ILogger zamiast Console.Error.
+   Updated: 2026-01-30 - UX: odstęp między AppBarem a główną treścią.
+   Updated: 2026-01-30 - Layout: scroll tylko w treści, AppBar i Drawer nieruchome.
+   Updated: 2026-02-03 - UX: username + host w AppBar nie są klikalne (bez linku/przycisku).
+   Updated: 2026-02-06 - UX: AppBar notification badge dla nowych ticketów (queue New, unassigned).
+   Updated: 2026-02-06 - UX polish: badge widoczny stabilnie (bez skakania), Color.Error, lepszy tooltip (0 vs >0), stały odstęp.
+   Updated: 2026-02-06 - UX: ujednolicenie tooltipów w AppBarze (spójny styl jak "New tickets").
+   Version: 1.20 *@
+
+<MudThemeProvider Theme="@_theme" IsDarkMode="@_isDarkMode" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+
+@if (!_isUiReady)
+{
+    <div style="height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column;">
+        <MudProgressCircular Indeterminate="true" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.body2" Class="mt-3">@L["Ui.LoadingPortal"]</MudText>
+    </div>
+}
+else
+{
+    @if (_isAuthenticated && !_hasAccess)
+    {
+        <div style="height:100vh; display:flex; align-items:center; justify-content:center; padding:16px;">
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Style="max-width:720px; width:100%;">
+                @L["NoAccess.Message"]
+                <div style="opacity:0.85; font-size:0.9em; margin-top:8px;">
+                    @L["NoAccess.Details",
+                    _loginForDisplay,
+                        (_objectGuidForDisplay ?? L["Common.Null"].Value),
+                        (_isActiveForDisplay ?? L["Common.Null"].Value)]
+        </div>
+    </MudAlert>
+</div>
+    }
+    else
+    {
+        <MudLayout>
+
+            <MudDrawerContainer>
+
+                <MudDrawer Anchor="Anchor.Start"
+                           Variant="DrawerVariant.Responsive"
+                           Elevation="0"
+                           @bind-Open="_leftOpen"
+                           Breakpoint="Breakpoint.Md"
+                           Overlay="false">
+
+                    <div class="th-drawer-header" style="padding:16px; text-align:center;">
+                        <img src="images/tristone_logo.png"
+                             alt="@LogoAltText"
+                             style="max-width:110px; height:auto;" />
+                    </div>
+
+                    <AppNavMenu IsDrawerExpanded="_leftOpen" />
+
+                </MudDrawer>
+
+                <MudMainContent Class="th-main-content">
+
+                    <MudAppBar Elevation="0"
+                               Color="Color.Default"
+                               Class="pa-2 th-appbar">
+
+                        <MudTooltip Placement="Placement.Bottom" Text="@ToggleMenuTooltipText" ShowArrow="true">
+                            <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                                           Color="Color.Primary"
+                                           Edge="Edge.Start"
+                                           OnClick="ToggleLeftDrawer" />
+                        </MudTooltip>
+
+                        <MudText Typo="Typo.h6" Class="ml-2">
+                            @AppTitleText
+                        </MudText>
+
+                        <MudSpacer />
+
+                        @* New tickets badge: widoczne tylko dla Tickets.Edit.Assigned / Tickets.Edit.All *@
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="th-appbar-actions">
+
+                            @if (_canSeeNewTicketsBadge)
+                            {
+                                <MudTooltip Placement="Placement.Bottom" Text="@NewTicketsTooltipText" ShowArrow="true">
+                                    <div class="th-badge-slot">
+                                        <MudBadge Overlap="true"
+                                                  Origin="Origin.TopRight"
+                                                  Visible="@(_newTicketsQueueCount > 0)"
+                                                  Content="@NewTicketsBadgeContent"
+                                                  Color="Color.Error">
+                                            <MudIconButton Icon="@Icons.Material.Filled.ConfirmationNumber"
+                                                           Color="Color.Primary"
+                                                           AriaLabel="@NewTicketsAriaLabel"
+                                                           OnClick="NavigateToTicketsQueue" />
+                                        </MudBadge>
+                                    </div>
+                                </MudTooltip>
+                            }
+
+                            <MudMenu AnchorOrigin="Origin.BottomRight"
+                                     TransformOrigin="Origin.TopRight"
+                                     Dense="true">
+                                <ActivatorContent>
+                                    <MudTooltip Placement="Placement.Bottom" Text="@LanguageTooltipText" ShowArrow="true">
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                            <MudIcon Icon="@Icons.Material.Filled.Language" Color="Color.Primary" />
+                                            <MudText Typo="Typo.caption" Style="font-weight:600; opacity:0.8;">
+                                                @CurrentLanguageShort
+                                            </MudText>
+                                        </MudStack>
+                                    </MudTooltip>
+                                </ActivatorContent>
+
+                                <ChildContent>
+                                    <MudMenuItem OnClick="@(() => SetCulture(CultureEn))">@L["Language.EN"]</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetCulture(CulturePl))">@L["Language.PL"]</MudMenuItem>
+                                </ChildContent>
+                            </MudMenu>
+
+                            <MudTooltip Placement="Placement.Bottom" Text="@ToggleThemeTitleText" ShowArrow="true">
+                                <MudIconButton Icon="@(_isDarkMode? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                                               Color="Color.Primary"
+                                               OnClick="ToggleDarkMode" />
+                            </MudTooltip>
+
+                            <MudTooltip Placement="Placement.Bottom" Text="@UserTooltipText" ShowArrow="true">
+                                <div class="mr-1 ml-1" style="padding:0 8px; user-select:none;">
+                                    <MudStack Spacing="0" AlignItems="AlignItems.End">
+                                        <MudText Typo="Typo.body1">
+                                            @FormattedUserName
+                                        </MudText>
+
+                                        @if (!string.IsNullOrWhiteSpace(ClientHostShortName))
+                                        {
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                                <MudIcon Icon="@ClientHostIcon" Size="Size.Small" Style="opacity:0.65;" />
+                                                <MudText Typo="Typo.caption" Style="opacity:0.65;">
+                                                    @ClientHostShortName
+                                                </MudText>
+                                            </MudStack>
+                                        }
+                                    </MudStack>
+                                </div>
+                            </MudTooltip>
+
+                        </MudStack>
+
+                    </MudAppBar>
+
+                    <div class="th-content-scroll">
+                        <MudContainer MaxWidth="MaxWidth.False" Class="pa-4 th-main-container">
+                            @Body
+                        </MudContainer>
+                    </div>
+
+                </MudMainContent>
+
+            </MudDrawerContainer>
+
+        </MudLayout>
+    }
+}
+
+@code {
+
+    private const string LeftDrawerStorageKey = "tristonehub-leftdrawer-open";
+    private const string DarkModeStorageKey = "tristonehub-darkmode";
+
+    private const string CulturePl = "pl-PL";
+    private const string CultureEn = "en-US";
+
+    private const string PermEditAssigned = "Tickets.Edit.Assigned";
+    private const string PermEditAll = "Tickets.Edit.All";
+
+    private bool _leftOpen = false;
+    private bool _isDarkMode = true;
+
+    private bool _isUiReady = false;
+
+    private string userName = string.Empty;
+    private string _clientHostFullName = string.Empty;
+
+    private bool _isAuthenticated = false;
+    private bool _hasAccess = false;
+
+    private string _loginForDisplay = string.Empty;
+    private string? _objectGuidForDisplay;
+    private string? _isActiveForDisplay;
+
+    private bool _canSeeNewTicketsBadge = false;
+    private int _newTicketsQueueCount = 0;
+
+    private CancellationTokenSource? _newTicketsCts;
+    private Task? _newTicketsLoopTask;
+
+    protected override void OnInitialized()
+    {
+        userName = string.Empty;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            EnsureCultureCookieBySystemLanguage();
+
+            await CurrentUserContextService.EnsureInitializedAsync();
+
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            _isAuthenticated = ctx != null && ctx.IsAuthenticated && !string.IsNullOrWhiteSpace(ctx.Login);
+            _hasAccess = _isAuthenticated && CurrentUserContextService.HasAccess;
+
+            _loginForDisplay = _isAuthenticated ? (ctx!.Login ?? string.Empty) : string.Empty;
+            _objectGuidForDisplay = ctx?.ObjectGuid?.ToString();
+            _isActiveForDisplay = ctx?.IsActive?.ToString();
+
+            if (_isAuthenticated)
+                userName = ctx!.Login;
+            else
+                userName = string.Empty;
+
+            _clientHostFullName = await ResolveClientHostNameAsync();
+
+            if (_hasAccess)
+                await RegisterVisitAsync();
+
+            await RestoreDrawerStateOnFirstEntryAsync();
+            await RestoreDarkModeAsync();
+
+            if (_hasAccess && ctx != null)
+            {
+                _canSeeNewTicketsBadge = ctx.Has(PermEditAssigned) || ctx.Has(PermEditAll);
+
+                if (_canSeeNewTicketsBadge)
+                {
+                    await RefreshNewTicketsQueueCountAsync();
+                    StartNewTicketsBadgeLoop();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[MainLayout] Błąd inicjalizacji layoutu.");
+        }
+        finally
+        {
+            _isUiReady = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshNewTicketsQueueCountAsync()
+    {
+        if (!_canSeeNewTicketsBadge || !_hasAccess)
+        {
+            if (_newTicketsQueueCount != 0)
+            {
+                _newTicketsQueueCount = 0;
+                await InvokeAsync(StateHasChanged);
+            }
+            return;
+        }
+
+        try
+        {
+            var count = await TicketsService.GetTicketsQueueCountAsync().ConfigureAwait(false);
+
+            if (count < 0)
+                count = 0;
+
+            if (count != _newTicketsQueueCount)
+            {
+                _newTicketsQueueCount = count;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _canSeeNewTicketsBadge = false;
+
+            if (_newTicketsQueueCount != 0)
+                _newTicketsQueueCount = 0;
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "[MainLayout] Nie udało się pobrać liczby ticketów New (queue).");
+        }
+    }
+
+    private void StartNewTicketsBadgeLoop()
+    {
+        if (_newTicketsCts != null)
+            return;
+
+        _newTicketsCts = new CancellationTokenSource();
+        var token = _newTicketsCts.Token;
+
+        _newTicketsLoopTask = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(60), token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+
+                if (token.IsCancellationRequested)
+                    break;
+
+                await RefreshNewTicketsQueueCountAsync();
+            }
+        }, token);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_newTicketsCts != null)
+            {
+                _newTicketsCts.Cancel();
+                _newTicketsCts.Dispose();
+                _newTicketsCts = null;
+            }
+
+            if (_newTicketsLoopTask != null)
+            {
+                try { await _newTicketsLoopTask; } catch { }
+                _newTicketsLoopTask = null;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void NavigateToTicketsQueue()
+    {
+        Navigation.NavigateTo("/tickets/queue");
+    }
+
+    private async Task RestoreDrawerStateOnFirstEntryAsync()
+    {
+        try
+        {
+            var width = await JS.InvokeAsync<int>("eval", "window.innerWidth");
+            var isAtLeastMd = width >= 960;
+
+            var saved = await JS.InvokeAsync<string>("localStorage.getItem", LeftDrawerStorageKey);
+
+            if (string.IsNullOrWhiteSpace(saved))
+            {
+                _leftOpen = isAtLeastMd;
+                await JS.InvokeVoidAsync("localStorage.setItem", LeftDrawerStorageKey, _leftOpen ? "true" : "false");
+                return;
+            }
+
+            var parsed = string.Equals(saved, "true", StringComparison.OrdinalIgnoreCase);
+            _leftOpen = parsed && isAtLeastMd;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.ReadDrawerState"].Value);
+            _leftOpen = true;
+        }
+    }
+
+    private async Task RestoreDarkModeAsync()
+    {
+        try
+        {
+            var saved = await JS.InvokeAsync<string>("localStorage.getItem", DarkModeStorageKey);
+
+            if (string.IsNullOrWhiteSpace(saved))
+            {
+                _isDarkMode = true;
+                await JS.InvokeVoidAsync("localStorage.setItem", DarkModeStorageKey, "true");
+            }
+            else
+            {
+                _isDarkMode = string.Equals(saved, "true", StringComparison.OrdinalIgnoreCase);
+            }
+
+            await UpdateBodyThemeClassAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.ReadDarkMode"].Value);
+            _isDarkMode = true;
+            await UpdateBodyThemeClassAsync();
+        }
+    }
+
+    private async Task SaveLeftDrawerStateAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", LeftDrawerStorageKey, _leftOpen ? "true" : "false");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.SaveDrawerState"].Value);
+        }
+    }
+
+    private async Task ToggleLeftDrawer()
+    {
+        _leftOpen = !_leftOpen;
+        await SaveLeftDrawerStateAsync();
+    }
+
+    private async Task ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", DarkModeStorageKey, _isDarkMode.ToString().ToLowerInvariant());
+            await UpdateBodyThemeClassAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.SaveDarkMode"].Value);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task UpdateBodyThemeClassAsync()
+    {
+        var script = _isDarkMode
+            ? "document.body.classList.remove('app-light'); document.body.classList.add('app-dark');"
+            : "document.body.classList.remove('app-dark'); document.body.classList.add('app-light');";
+
+        await JS.InvokeVoidAsync("eval", script);
+    }
+
+    private void EnsureCultureCookieBySystemLanguage()
+    {
+        try
+        {
+            if (IsCultureCookiePresent())
+                return;
+
+            var currentUi = CultureInfo.CurrentUICulture?.Name ?? string.Empty;
+
+            var desired = string.Equals(currentUi, CulturePl, StringComparison.OrdinalIgnoreCase)
+                ? CulturePl
+                : CultureEn;
+
+            if (string.Equals(currentUi, desired, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            SetCulture(desired);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] Auto culture warning.");
+        }
+    }
+
+    private bool IsCultureCookiePresent()
+    {
+        var httpContext = HttpContextAccessor.HttpContext;
+        if (httpContext == null)
+            return false;
+
+        return httpContext.Request.Cookies.ContainsKey(CookieRequestCultureProvider.DefaultCookieName);
+    }
+
+    private void SetCulture(string culture)
+    {
+        try
+        {
+            var current = Navigation.ToBaseRelativePath(Navigation.Uri);
+            var redirect = string.IsNullOrWhiteSpace(current) ? "/" : $"/{current}";
+            var url = $"/set-culture?culture={Uri.EscapeDataString(culture)}&redirectUri={Uri.EscapeDataString(redirect)}";
+            Navigation.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.ChangeLanguage"].Value);
+        }
+    }
+
+    private string CurrentLanguageShort
+    {
+        get
+        {
+            var culture = CultureInfo.CurrentUICulture.Name;
+
+            if (string.Equals(culture, CulturePl, StringComparison.OrdinalIgnoreCase))
+                return "PL";
+
+            if (string.Equals(culture, CultureEn, StringComparison.OrdinalIgnoreCase))
+                return "EN";
+
+            return culture.ToUpperInvariant();
+        }
+    }
+
+    private string UnknownUserText
+    {
+        get
+        {
+            var localized = L["UnknownUser"];
+            return string.Equals(localized.Value, "UnknownUser", StringComparison.Ordinal) ? "Unknown" : localized.Value;
+        }
+    }
+
+    private string AppTitleText
+    {
+        get
+        {
+            var localized = L["AppTitle"];
+            return string.Equals(localized.Value, "AppTitle", StringComparison.Ordinal) ? "ITManager" : localized.Value;
+        }
+    }
+
+    private string LogoAltText
+    {
+        get
+        {
+            var localized = L["LogoAlt"];
+            return string.Equals(localized.Value, "LogoAlt", StringComparison.Ordinal) ? "Tristone logo" : localized.Value;
+        }
+    }
+
+    private string ToggleThemeTitleText
+    {
+        get
+        {
+            var localized = L["ToggleThemeTitle"];
+            return string.Equals(localized.Value, "ToggleThemeTitle", StringComparison.Ordinal) ? "Toggle theme" : localized.Value;
+        }
+    }
+
+    private string ToggleMenuTooltipText
+    {
+        get
+        {
+            var fallback = "Toggle menu";
+            try
+            {
+                var localized = L["Nav.ToggleMenu"];
+                if (!string.Equals(localized.Value, "Nav.ToggleMenu", StringComparison.Ordinal))
+                    return localized.Value;
+            }
+            catch
+            {
+            }
+            return fallback;
+        }
+    }
+
+    private string LanguageTooltipText
+    {
+        get
+        {
+            var fallback = "Language";
+            try
+            {
+                var localized = L["Language.Tooltip"];
+                if (!string.Equals(localized.Value, "Language.Tooltip", StringComparison.Ordinal))
+                    return localized.Value;
+            }
+            catch
+            {
+            }
+            return fallback;
+        }
+    }
+
+    private string UserTooltipText
+    {
+        get
+        {
+            if (!_isAuthenticated)
+                return UnknownUserText;
+
+            var name = FormattedUserName;
+
+            if (string.IsNullOrWhiteSpace(ClientHostShortName))
+                return $"{name} ({_loginForDisplay})";
+
+            return $"{name} ({_loginForDisplay}) | {ClientHostShortName}";
+        }
+    }
+
+    private string FormattedUserName
+    {
+        get
+        {
+            if (!_isAuthenticated || string.IsNullOrWhiteSpace(userName))
+                return UnknownUserText;
+
+            var raw = userName;
+
+            if (raw.Contains('\\'))
+                raw = raw.Split('\\').Last();
+
+            raw = raw.Trim();
+
+            if (raw.Contains('.'))
+            {
+                var parts = raw.Split('.', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                    return $"{Capitalize(parts[1])}, {Capitalize(parts[0])}";
+            }
+
+            return Capitalize(raw);
+        }
+    }
+
+    private static string Capitalize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        value = value.ToLowerInvariant();
+        return char.ToUpperInvariant(value[0]) + value[1..];
+    }
+
+    private string ClientHostShortName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_clientHostFullName))
+                return string.Empty;
+
+            var trimmed = _clientHostFullName.Trim();
+            var dotIndex = trimmed.IndexOf('.');
+            return dotIndex > 0 ? trimmed.Substring(0, dotIndex) : trimmed;
+        }
+    }
+
+    private string ClientHostIcon
+    {
+        get
+        {
+            var host = ClientHostShortName;
+
+            if (string.IsNullOrWhiteSpace(host))
+                return Icons.Material.Filled.Devices;
+
+            if (host.Contains("WKS", StringComparison.OrdinalIgnoreCase))
+                return Icons.Material.Filled.DesktopWindows;
+
+            if (host.Contains("LTP", StringComparison.OrdinalIgnoreCase))
+                return Icons.Material.Filled.Laptop;
+
+            return Icons.Material.Filled.Devices;
+        }
+    }
+
+    private string NewTicketsBadgeContent
+    {
+        get
+        {
+            if (_newTicketsQueueCount <= 0)
+                return string.Empty;
+
+            if (_newTicketsQueueCount >= 100)
+                return "99+";
+
+            return _newTicketsQueueCount.ToString(CultureInfo.InvariantCulture);
+        }
+    }
+
+    private string NewTicketsTooltipText
+    {
+        get
+        {
+            var baseText = "New tickets";
+            try
+            {
+                var localized = L["Tickets.NewTicketsBadge"];
+                if (!string.Equals(localized.Value, "Tickets.NewTicketsBadge", StringComparison.Ordinal))
+                    baseText = localized.Value;
+            }
+            catch
+            {
+            }
+
+            if (_newTicketsQueueCount <= 0)
+                return $"{baseText}: 0";
+
+            return $"{baseText}: {_newTicketsQueueCount}";
+        }
+    }
+
+    private string NewTicketsAriaLabel
+    {
+        get
+        {
+            if (_newTicketsQueueCount <= 0)
+                return "New tickets queue. No new tickets.";
+
+            return $"New tickets queue. {_newTicketsQueueCount} new tickets.";
+        }
+    }
+
+    private async Task<string> ResolveClientHostNameAsync()
+    {
+        try
+        {
+            var httpContext = HttpContextAccessor.HttpContext;
+            if (httpContext == null)
+                return Environment.MachineName;
+
+            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString();
+            var hostName = remoteIp;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(remoteIp))
+                {
+                    var ipAddress = IPAddress.Parse(remoteIp);
+                    var entry = await Dns.GetHostEntryAsync(ipAddress);
+
+                    if (!string.IsNullOrWhiteSpace(entry.HostName))
+                        hostName = entry.HostName;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "[MainLayout] Reverse DNS lookup nieudany.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hostName))
+                hostName = Environment.MachineName;
+
+            return hostName;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "[MainLayout] Nie udało się ustalić nazwy hosta klienta.");
+            return Environment.MachineName;
+        }
+    }
+
+    private async Task RegisterVisitAsync()
+    {
+        try
+        {
+            var httpContext = HttpContextAccessor.HttpContext;
+            if (httpContext == null)
+                return;
+
+            if (!_hasAccess || string.IsNullOrWhiteSpace(userName))
+                return;
+
+            var recordedUserName = userName;
+            var recordedHostName = string.IsNullOrWhiteSpace(_clientHostFullName) ? Environment.MachineName : _clientHostFullName;
+
+            await ContactsService.IncreaseVisitCountAsync(recordedHostName, recordedUserName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[MainLayout] {MessageKey}", L["Errors.RegisterVisit"].Value);
+        }
+    }
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0288D1",
+            Secondary = "#FEDA47",
+            Background = "#F5F5F5",
+            Surface = "#FFFFFF",
+            AppbarBackground = "#FFFFFF",
+            AppbarText = "#333333",
+            DrawerBackground = "#FFFFFF",
+            DrawerText = "#333333",
+            TextPrimary = "#333333"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#0288D1",
+            Secondary = "#FEDA47",
+            Background = "#121212",
+            Surface = "#1E1E1E",
+            AppbarBackground = "#181818",
+            AppbarText = "#FFFFFF",
+            DrawerBackground = "#181818",
+            DrawerText = "#EEEEEE",
+            TextPrimary = "#E0E0E0",
+            TextSecondary = "#B0B0B0",
+            TableHover = "#2E2E2E",
+            TableStriped = "#262626",
+            TableLines = "#303030",
+            Divider = "#333333"
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DefaultBorderRadius = "6px"
+        }
+    };
+}

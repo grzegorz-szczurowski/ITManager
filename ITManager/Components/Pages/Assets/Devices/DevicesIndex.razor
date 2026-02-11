@@ -1,0 +1,1258 @@
+﻿@page "/assets/devices"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Devices.View")]
+
+@* File: Components/Pages/DevicesIndex.razor
+   Description: Lista zasobów IT (devices) w oparciu o MudDataGrid. Widok spójny z Tickets.
+                Search zawsze widoczny + Advanced filters (collapse).
+                Filtry Type/Kind/Status/Producer działają po ID (bo devices.*_id to int), a w UI pokazujemy Name z lookupów.
+                Model/Location/User pozostają stringowe.
+   Version: 1.12
+   Updated: 2026-02-08
+   Change log:
+   - 1.07 (2026-01-09) RBAC: rozdzielenie Create/Edit/Delete. Add device wymaga Assets.Devices.Create, klik w wiersz wymaga Assets.Devices.Edit.
+   - 1.08 (2026-01-22) Export: eksport widocznych danych gridu do XLSX (FilteredItems + ClosedXML) + download przez JS module.
+   - 1.09 (2026-01-23) Grid: standard szerokości kolumn jak UsersIndex: procenty + table-layout fixed + ellipsis.
+   - 1.10 (2026-01-24) TimeZone: timestamp eksportu XLSX w strefie czasowej użytkownika (z System Settings).
+   - 1.11 (2026-01-25) RBAC+Logging:
+        - Page-level Authorize Policy (Perm:Assets.Devices.View)
+        - permissiony liczone przez CurrentUserContextService.Can(...)
+        - ILogger zamiast Console.Error
+   - 1.12 (2026-02-08) Navigation: usunięcie DeviceEditDialog, przejście na stronę /assets/devices/{id} oraz /assets/devices/0.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using System.Net.Sockets
+@using System.Text
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@implements IAsyncDisposable
+
+@inject DevicesService DevicesService
+@inject NavigationManager NavigationManager
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IConfiguration Configuration
+@inject IStringLocalizer<DevicesIndex> L
+@inject IJSRuntime JS
+@inject TimeZoneService TimeZoneService
+@inject ILogger<DevicesIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* Tytuł + refresh + search *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="_isLoading || _isPrinting || _isExporting || !_canViewDevices" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="_isLoading || _isPrinting || _isExporting || !_canViewDevices"
+                              Class="device-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 device-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="_isLoading || _isPrinting || _isExporting || !_canViewDevices">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="_isLoading || _isPrinting || _isExporting || !_canViewDevices">
+                    @L["AdvancedFilters"]
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewDevices)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            @* Kontener treści listy: overlay ma zasłaniać tylko ten obszar *@
+            <div class="device-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_lookupsError))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true">
+                        @_lookupsError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 device-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="int"
+                                           Label="@L["Filter_Type"]"
+                                           Value="@_selectedTypeId"
+                                           ValueChanged="OnTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllId">@L["All"]</MudSelectItem>
+                                    @foreach (var t in (_lookups.Types ?? new List<LookupItem>()))
+                                    {
+                                        <MudSelectItem Value="@t.Id">@t.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="int"
+                                           Label="@L["Filter_Kind"]"
+                                           Value="@_selectedKindId"
+                                           ValueChanged="OnKindChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllId">@L["All"]</MudSelectItem>
+                                    @foreach (var k in (_lookups.Kinds ?? new List<LookupItem>()))
+                                    {
+                                        <MudSelectItem Value="@k.Id">@k.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="int"
+                                           Label="@L["Filter_Status"]"
+                                           MultiSelection="true"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           SelectedValues="_selectedStatusIds"
+                                           SelectedValuesChanged="OnSelectedStatusesChanged"
+                                           MultiSelectionTextFunc="@(vals => FormatSelectedStatuses(vals))"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllId">@L["All"]</MudSelectItem>
+                                    @foreach (var s in (_lookups.Statuses ?? new List<LookupItem>()))
+                                    {
+                                        <MudSelectItem Value="@s.Id">@s.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="int"
+                                           Label="@L["Filter_Producer"]"
+                                           Value="@_selectedProducerId"
+                                           ValueChanged="OnProducerChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllId">@L["All"]</MudSelectItem>
+                                    @foreach (var p in (_lookups.Producers ?? new List<LookupItem>()))
+                                    {
+                                        <MudSelectItem Value="@p.Id">@p.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Model"]"
+                                           Value="@_selectedModel"
+                                           ValueChanged="OnModelChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var m in (_lookups.Models ?? new List<string>()))
+                                    {
+                                        <MudSelectItem Value="@m">@m</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Location"]"
+                                           Value="@_selectedLocation"
+                                           ValueChanged="OnLocationChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var l in (_lookups.Locations ?? new List<string>()))
+                                    {
+                                        <MudSelectItem Value="@l">@l</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_User"]"
+                                           Value="@_selectedUser"
+                                           ValueChanged="OnUserChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           SearchBoxAutoFocus="true"
+                                           Clearable="true"
+                                           Strict="false"
+                                           Disabled="_isLoading || _isPrinting || _isExporting">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var u in (_lookups.Users ?? new List<string>()))
+                                    {
+                                        <MudSelectItem Value="@u">@u</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                @* Przyciski funkcyjne *@
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenAddDialogAsync"
+                               Disabled="@(_isLoading || _isPrinting || _isExporting || !_canCreateDevices)">
+                        @L["AddDevice"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               Class="ml-2"
+                               OnClick="ExportVisibleToExcelAsync"
+                               Disabled="@(_isLoading || _isPrinting || _isExporting || (_filteredRows?.Count ?? 0) == 0)">
+                        @Txt("ExportExcel", "Export Excel")
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Print"
+                               Class="ml-2"
+                               OnClick="PrintSelectedAsync"
+                               Disabled="@(_isLoading || _isPrinting || _isExporting || _selectedRowIds.Count == 0)">
+                        @L["PrintAssetLabel"]
+                    </MudButton>
+
+                </MudStack>
+
+                <MudDataGrid T="DeviceListRow"
+                             @ref="_grid"
+                             Class="devices-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             RowClick="OnRowClickAsync"
+                             @bind-RowsPerPage="_rowsPerPage">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="DeviceListRow"
+                                              PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        @* Standard jak UsersIndex: procenty + table-layout fixed (CSS), ellipsis *@
+                        <TemplateColumn Title=""
+                                        Sortable="false"
+                                        Filterable="false"
+                                        HeaderStyle="width:3%;"
+                                        CellStyle="width:3%;">
+                            <HeaderTemplate>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center">
+                                    <MudCheckBox T="bool"
+                                                 Dense="true"
+                                                 Checked="@AreAllVisibleRowsSelected()"
+                                                 CheckedChanged="@((bool? v) => ToggleSelectAllVisibleAsync(v))"
+                                                 Disabled="@(_isLoading || _isPrinting || _isExporting || _filteredRows.Count == 0)" />
+                                </MudStack>
+                            </HeaderTemplate>
+
+                            <CellTemplate Context="context">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center">
+                                    <span @onclick:stopPropagation="true"
+                                          @onmousedown:stopPropagation="true"
+                                          @onmouseup:stopPropagation="true">
+                                        <MudCheckBox T="bool"
+                                                     Dense="true"
+                                                     Checked="@IsRowSelected(context.Item)"
+                                                     CheckedChanged="@((bool? v) => OnRowCheckboxChanged(context.Item, v))"
+                                                     Disabled="@(_isLoading || _isPrinting || _isExporting)" />
+                                    </span>
+                                </MudStack>
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.Kind"
+                                        Title="@L["Col_Kind"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:9%;"
+                                        CellStyle="width:9%;" />
+
+                        <PropertyColumn Property="x => x.Hostname"
+                                        Title="@L["Col_Hostname"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.User"
+                                        Title="@L["Col_User"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:18%;"
+                                        CellStyle="width:18%;" />
+
+                        <PropertyColumn Property="x => x.Location"
+                                        Title="@L["Col_Location"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:18%;"
+                                        CellStyle="width:18%;" />
+
+                        <TemplateColumn Title="@L["Col_Model"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:18%;"
+                                        CellStyle="width:18%;">
+                            <CellTemplate Context="context">
+                                @FormatProducerModel(context.Item)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <TemplateColumn Title="@L["Col_SerialNumber"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:11%;"
+                                        CellStyle="width:11%;">
+                            <CellTemplate Context="context">
+                                @((context.Item?.SerialNumber ?? string.Empty).Trim())
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <TemplateColumn Title="@L["Col_AssetNo"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:7%;"
+                                        CellStyle="width:7%;">
+                            <CellTemplate Context="context">
+                                @((context.Item?.AssetNo ?? string.Empty).Trim())
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.Status"
+                                        Title="@L["Col_Status"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:4%;"
+                                        CellStyle="width:4%;" />
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@(_isLoading || _isPrinting || _isExporting)"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="device-overlay">
+                    <MudPaper Class="pa-6 device-overlay-card">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @(_isPrinting? L["Overlay_Printing"] : L["Overlay_Loading"])
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .device-row {
+        min-height: 44px;
+    }
+
+        .device-row td,
+        .device-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .device-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .device-row-clickable {
+        cursor: pointer;
+    }
+
+    .device-search {
+        min-width: 400px;
+    }
+
+    .device-filters-panel {
+        border-radius: 8px;
+    }
+
+    .device-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .device-clear-btn {
+        border-width: 1px;
+    }
+
+    .device-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .device-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .device-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    /* Standard dopasowania kolumn jak UsersIndex */
+    .devices-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .devices-grid th,
+    .devices-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const int AllId = -1;
+    private const string AllValue = "__all";
+
+    private bool _ready;
+    private bool _isLoading = true;
+    private bool _isPrinting;
+    private bool _isExporting;
+
+    private bool _canViewDevices;
+    private bool _canEditDevices;
+    private bool _canCreateDevices;
+    private bool _canDeleteDevices;
+
+    private bool _bootstrapped;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private List<DeviceListRow> _allRows = new();
+    private List<DeviceListRow> _filteredRows = new();
+
+    private DeviceFilterLookups _lookups = new();
+    private string _lookupsError = string.Empty;
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private int _selectedTypeId = AllId;
+    private int _selectedKindId = AllId;
+    private int _selectedProducerId = AllId;
+    private HashSet<int> _selectedStatusIds = new();
+
+    private string _selectedModel = AllValue;
+    private string _selectedLocation = AllValue;
+    private string _selectedUser = AllValue;
+
+    private HashSet<int> _selectedRowIds = new();
+
+    private MudDataGrid<DeviceListRow>? _grid;
+    private IJSObjectReference? _downloadModule;
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        var isAuth = ctx != null && ctx.IsAuthenticated && ctx.IsActive == true;
+        var hasAccess = CurrentUserContextService.HasAccess;
+
+        _canViewDevices = isAuth && hasAccess && CurrentUserContextService.Can("Assets.Devices.View");
+        _canEditDevices = _canViewDevices && CurrentUserContextService.Can("Assets.Devices.Edit");
+        _canCreateDevices = _canViewDevices && CurrentUserContextService.Can("Assets.Devices.Create");
+        _canDeleteDevices = _canViewDevices && CurrentUserContextService.Can("Assets.Devices.Delete");
+
+        _ready = true;
+
+        if (!_canViewDevices)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        _isLoading = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_canViewDevices || _bootstrapped)
+            return;
+
+        _bootstrapped = true;
+
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        await LoadLookupsAsync();
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private async Task LoadLookupsAsync()
+    {
+        _lookupsError = string.Empty;
+
+        try
+        {
+            var result = await DevicesService.GetDevicesFilterLookupsAsync();
+            if (!result.Ok)
+            {
+                _lookups = new DeviceFilterLookups();
+                _lookupsError = result.ErrorMessage ?? L["Msg_LoadLookupsFailed"];
+                return;
+            }
+
+            _lookups = result.Lookups ?? new DeviceFilterLookups();
+            NormalizeFiltersAgainstLookups();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[DevicesIndex] Lookups error.");
+            _lookups = new DeviceFilterLookups();
+            _lookupsError = L["Msg_LoadLookupsError"];
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_isPrinting || _isExporting || !_canViewDevices)
+            return;
+
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        await InvokeAsync(StateHasChanged);
+
+        _selectedRowIds.Clear();
+
+        try
+        {
+            var result = await DevicesService.GetDevicesAsync();
+            if (!result.Ok)
+            {
+                _allRows = new List<DeviceListRow>();
+                _filteredRows = new List<DeviceListRow>();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add(L["Msg_LoadDevicesFailed"], Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new List<DeviceListRow>();
+
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["Msg_NoViewPermissionDevices"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[DevicesIndex] Load devices error.");
+            Snackbar.Add(L["Msg_LoadTryLater"], Severity.Error);
+
+            _allRows = new List<DeviceListRow>();
+            _filteredRows = new List<DeviceListRow>();
+            _loadError = L["Msg_LoadDataError"];
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedTypeId != AllId && !(_lookups.Types?.Any(x => x.Id == _selectedTypeId) ?? false))
+            _selectedTypeId = AllId;
+
+        if (_selectedKindId != AllId && !(_lookups.Kinds?.Any(x => x.Id == _selectedKindId) ?? false))
+            _selectedKindId = AllId;
+
+        if (_selectedProducerId != AllId && !(_lookups.Producers?.Any(x => x.Id == _selectedProducerId) ?? false))
+            _selectedProducerId = AllId;
+
+        if (_selectedStatusIds.Count > 0 && (_lookups.Statuses?.Count ?? 0) > 0)
+        {
+            var allowed = _lookups.Statuses.Select(x => x.Id).ToHashSet();
+            _selectedStatusIds = _selectedStatusIds.Where(id => allowed.Contains(id)).ToHashSet();
+        }
+        else if ((_lookups.Statuses?.Count ?? 0) == 0)
+        {
+            _selectedStatusIds.Clear();
+        }
+
+        if (_selectedModel != AllValue && !(_lookups.Models?.Contains(_selectedModel) ?? false))
+            _selectedModel = AllValue;
+
+        if (_selectedLocation != AllValue && !(_lookups.Locations?.Contains(_selectedLocation) ?? false))
+            _selectedLocation = AllValue;
+
+        if (_selectedUser != AllValue && !(_lookups.Users?.Contains(_selectedUser) ?? false))
+            _selectedUser = AllValue;
+    }
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+
+        _selectedTypeId = AllId;
+        _selectedKindId = AllId;
+        _selectedProducerId = AllId;
+        _selectedStatusIds = new HashSet<int>();
+
+        _selectedModel = AllValue;
+        _selectedLocation = AllValue;
+        _selectedUser = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnTypeChangedAsync(int value)
+    {
+        _selectedTypeId = value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnKindChangedAsync(int value)
+    {
+        _selectedKindId = value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnProducerChangedAsync(int value)
+    {
+        _selectedProducerId = value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectedStatusesChanged(object? values)
+    {
+        var enumerable = values as IEnumerable<int> ?? Enumerable.Empty<int>();
+        var set = enumerable.ToHashSet();
+
+        if (set.Contains(AllId))
+            _selectedStatusIds = new HashSet<int>();
+        else
+            _selectedStatusIds = set.Where(x => x > 0).ToHashSet();
+
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnModelChangedAsync(string value)
+    {
+        _selectedModel = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnLocationChangedAsync(string value)
+    {
+        _selectedLocation = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnUserChangedAsync(string value)
+    {
+        _selectedUser = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+    {
+        _filteredRows = BuildFilteredRows();
+        NormalizeSelectionAgainstVisibleData();
+    }
+
+    private void NormalizeSelectionAgainstVisibleData()
+    {
+        if (_selectedRowIds.Count == 0)
+            return;
+
+        var visibleIds = (_filteredRows ?? new List<DeviceListRow>())
+            .Select(x => x.Id)
+            .Where(id => id > 0)
+            .ToHashSet();
+
+        _selectedRowIds = _selectedRowIds.Where(id => visibleIds.Contains(id)).ToHashSet();
+    }
+
+    private List<DeviceListRow> BuildFilteredRows()
+    {
+        IEnumerable<DeviceListRow> query = _allRows;
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.Kind, term) ||
+                ContainsIgnoreCase(x.Hostname, term) ||
+                ContainsIgnoreCase(x.User, term) ||
+                ContainsIgnoreCase(x.Location, term) ||
+                ContainsIgnoreCase(x.Producer, term) ||
+                ContainsIgnoreCase(x.Model, term) ||
+                ContainsIgnoreCase(x.SerialNumber, term) ||
+                ContainsIgnoreCase(x.AssetNo, term) ||
+                ContainsIgnoreCase(x.Status, term)
+            );
+        }
+
+        if (_selectedTypeId != AllId)
+            query = query.Where(x => (x.TypeId ?? 0) == _selectedTypeId);
+
+        if (_selectedKindId != AllId)
+            query = query.Where(x => (x.KindId ?? 0) == _selectedKindId);
+
+        if (_selectedProducerId != AllId)
+            query = query.Where(x => (x.ProducerId ?? 0) == _selectedProducerId);
+
+        if (_selectedStatusIds.Count > 0)
+            query = query.Where(x => x.StatusId.HasValue && _selectedStatusIds.Contains(x.StatusId.Value));
+
+        if (_selectedModel != AllValue)
+            query = query.Where(x => string.Equals((x.Model ?? string.Empty).Trim(), _selectedModel, StringComparison.OrdinalIgnoreCase));
+
+        if (_selectedLocation != AllValue)
+            query = query.Where(x => string.Equals((x.Location ?? string.Empty).Trim(), _selectedLocation, StringComparison.OrdinalIgnoreCase));
+
+        if (_selectedUser != AllValue)
+            query = query.Where(x => string.Equals((x.User ?? string.Empty).Trim(), _selectedUser, StringComparison.OrdinalIgnoreCase));
+
+        return query.ToList();
+    }
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatProducerModel(DeviceListRow? row)
+    {
+        if (row == null)
+            return string.Empty;
+
+        var producer = (row.Producer ?? string.Empty).Trim();
+        var model = (row.Model ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(producer) && string.IsNullOrWhiteSpace(model))
+            return string.Empty;
+
+        if (string.IsNullOrWhiteSpace(producer))
+            return model;
+
+        if (string.IsNullOrWhiteSpace(model))
+            return producer;
+
+        return producer + " " + model;
+    }
+
+    private string GetRowClass(DeviceListRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditDevices ? "device-row device-row-clickable" : "device-row";
+    }
+
+    private Task OnRowClickAsync(DataGridRowClickEventArgs<DeviceListRow> args)
+    {
+        if (_isLoading || _isPrinting || _isExporting)
+            return Task.CompletedTask;
+
+        if (args?.Item == null)
+            return Task.CompletedTask;
+
+        var id = args.Item.Id;
+        if (id <= 0)
+        {
+            Snackbar.Add(L["Msg_InvalidId"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        if (!_canEditDevices)
+        {
+            Snackbar.Add(L["Msg_NoEditPermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigationManager.NavigateTo($"/assets/devices/{id}");
+        return Task.CompletedTask;
+    }
+
+    private Task OpenAddDialogAsync()
+    {
+        if (_isLoading || _isPrinting || _isExporting)
+            return Task.CompletedTask;
+
+        if (!_canCreateDevices)
+        {
+            Snackbar.Add(L["Msg_NoAddPermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigationManager.NavigateTo("/assets/devices/0");
+        return Task.CompletedTask;
+    }
+
+    private bool IsRowSelected(DeviceListRow? row)
+        => row != null && row.Id > 0 && _selectedRowIds.Contains(row.Id);
+
+    private Task OnRowCheckboxChanged(DeviceListRow? row, bool? isChecked)
+    {
+        if (row == null || row.Id <= 0)
+            return Task.CompletedTask;
+
+        var check = isChecked == true;
+
+        if (check)
+            _selectedRowIds.Add(row.Id);
+        else
+            _selectedRowIds.Remove(row.Id);
+
+        return Task.CompletedTask;
+    }
+
+    private bool AreAllVisibleRowsSelected()
+    {
+        if (_filteredRows == null || _filteredRows.Count == 0)
+            return false;
+
+        var ids = _filteredRows.Select(x => x.Id).Where(id => id > 0).ToList();
+        if (ids.Count == 0)
+            return false;
+
+        return ids.All(id => _selectedRowIds.Contains(id));
+    }
+
+    private Task ToggleSelectAllVisibleAsync(bool? isChecked)
+    {
+        var check = isChecked == true;
+
+        if (_filteredRows == null || _filteredRows.Count == 0)
+            return Task.CompletedTask;
+
+        var ids = _filteredRows.Select(x => x.Id).Where(id => id > 0).ToList();
+
+        if (check)
+        {
+            foreach (var id in ids)
+                _selectedRowIds.Add(id);
+        }
+        else
+        {
+            foreach (var id in ids)
+                _selectedRowIds.Remove(id);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task PrintSelectedAsync()
+    {
+        if (_isPrinting || _isExporting || _isLoading)
+            return;
+
+        if (_selectedRowIds.Count == 0)
+        {
+            Snackbar.Add(L["Msg_SelectAtLeastOne"], Severity.Info);
+            return;
+        }
+
+        var printerIp = (Configuration["Zebra:DevicesLabelPrinterIp"] ?? string.Empty).Trim();
+        var portRaw = (Configuration["Zebra:DevicesLabelPrinterPort"] ?? "9100").Trim();
+
+        if (string.IsNullOrWhiteSpace(printerIp))
+        {
+            Snackbar.Add(L["Msg_NoPrinterIp"], Severity.Error);
+            return;
+        }
+
+        if (!int.TryParse(portRaw, out var printerPort) || printerPort <= 0)
+        {
+            Snackbar.Add(L["Msg_BadPrinterPort"], Severity.Error);
+            return;
+        }
+
+        var rowsToPrint = (_allRows ?? new List<DeviceListRow>())
+            .Where(r => r != null && r.Id > 0 && _selectedRowIds.Contains(r.Id))
+            .ToList();
+
+        if (rowsToPrint.Count == 0)
+        {
+            Snackbar.Add(L["Msg_NoRecordsToPrint"], Severity.Warning);
+            _selectedRowIds.Clear();
+            return;
+        }
+
+        _isPrinting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            foreach (var row in rowsToPrint)
+            {
+                var labelValue = PickBestLabelValue(row);
+                if (string.IsNullOrWhiteSpace(labelValue))
+                    continue;
+
+                var zpl = BuildZplPlaceholder(labelValue);
+                await SendZplToPrinterAsync(printerIp, printerPort, zpl);
+            }
+
+            Snackbar.Add(string.Format(L["Msg_LabelsSent"], rowsToPrint.Count), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[DevicesIndex] Print selected error.");
+            Snackbar.Add(L["Msg_PrintFailed"], Severity.Error);
+        }
+        finally
+        {
+            _isPrinting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string PickBestLabelValue(DeviceListRow row)
+    {
+        var asset = (row.AssetNo ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(asset))
+            return asset;
+
+        var serial = (row.SerialNumber ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(serial))
+            return serial;
+
+        var host = (row.Hostname ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(host))
+            return host;
+
+        return row.Id > 0 ? row.Id.ToString() : string.Empty;
+    }
+
+    private static string BuildZplPlaceholder(string value)
+    {
+        var clean = SanitizeZplText(value);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("^XA");
+        sb.AppendLine("^PW400");
+        sb.AppendLine("^LL160");
+        sb.AppendLine("^FO18,10^A0N,28,28^FDTristone Flowtech Poland^FS");
+        sb.AppendLine("^FO18,60^A0N,40,40^FD" + clean + "^FS");
+        sb.AppendLine("^XZ");
+
+        return sb.ToString();
+    }
+
+    private static string SanitizeZplText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        return text.Trim()
+                   .Replace("^", " ")
+                   .Replace("~", " ");
+    }
+
+    private static async Task SendZplToPrinterAsync(string printerIp, int printerPort, string zpl)
+    {
+        if (string.IsNullOrWhiteSpace(zpl))
+            throw new ArgumentException("ZPL is empty.", nameof(zpl));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(printerIp, printerPort);
+
+        using var stream = client.GetStream();
+        var bytes = Encoding.ASCII.GetBytes(zpl);
+        await stream.WriteAsync(bytes, 0, bytes.Length);
+        await stream.FlushAsync();
+    }
+
+    private string FormatSelectedStatuses(List<string> selectedValues)
+    {
+        if (selectedValues == null || selectedValues.Count == 0)
+            return L["All"];
+
+        var ids = new List<int>();
+        foreach (var v in selectedValues)
+            if (int.TryParse(v, out var id))
+                ids.Add(id);
+
+        if (ids.Count == 0 || ids.Contains(AllId))
+            return L["All"];
+
+        var map = (_lookups.Statuses ?? new List<LookupItem>())
+            .ToDictionary(x => x.Id, x => (x.Name ?? string.Empty).Trim());
+
+        var names = ids
+            .Where(id => id > 0)
+            .Select(id => map.TryGetValue(id, out var name) ? name : id.ToString())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToList();
+
+        return names.Count == 0 ? L["All"] : string.Join(", ", names);
+    }
+
+    private async Task ExportVisibleToExcelAsync()
+    {
+        if (_isLoading || _isPrinting || _isExporting)
+            return;
+
+        if (!_canViewDevices)
+        {
+            Snackbar.Add(Txt("Msg_NoViewPermissionDevices", "Brak uprawnień do podglądu urządzeń."), Severity.Warning);
+            return;
+        }
+
+        var exportRows = GetExportRows();
+        if (exportRows.Count == 0)
+        {
+            Snackbar.Add(Txt("Msg_NoRecordsToExport", "Brak danych do eksportu."), Severity.Info);
+            return;
+        }
+
+        _isExporting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+            var fileName = "devices_" + nowLocal.ToString("yyyyMMdd_HHmm") + ".xlsx";
+            var contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var bytes = BuildDevicesXlsx(exportRows);
+
+            var module = await GetDownloadModuleAsync();
+            var base64 = Convert.ToBase64String(bytes);
+
+            await module.InvokeVoidAsync("downloadFileFromBase64", fileName, contentType, base64);
+
+            Snackbar.Add(Txt("Msg_ExportDone", "Eksport zakończony."), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[DevicesIndex] Export error.");
+            Snackbar.Add(Txt("Msg_ExportFailed", "Eksport nieudany. Spróbuj ponownie."), Severity.Error);
+        }
+        finally
+        {
+            _isExporting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<DeviceListRow> GetExportRows()
+    {
+        try
+        {
+            if (_grid?.FilteredItems != null)
+                return _grid.FilteredItems.Where(x => x != null).ToList();
+        }
+        catch
+        {
+        }
+
+        return (_filteredRows ?? new List<DeviceListRow>()).Where(x => x != null).ToList();
+    }
+
+    private static byte[] BuildDevicesXlsx(List<DeviceListRow> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Devices");
+
+        ws.Cell(1, 1).Value = "Kind";
+        ws.Cell(1, 2).Value = "Hostname";
+        ws.Cell(1, 3).Value = "User";
+        ws.Cell(1, 4).Value = "Location";
+        ws.Cell(1, 5).Value = "Model";
+        ws.Cell(1, 6).Value = "SerialNumber";
+        ws.Cell(1, 7).Value = "AssetNo";
+        ws.Cell(1, 8).Value = "Status";
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            ws.Cell(r, 1).Value = (row.Kind ?? string.Empty).Trim();
+            ws.Cell(r, 2).Value = (row.Hostname ?? string.Empty).Trim();
+            ws.Cell(r, 3).Value = (row.User ?? string.Empty).Trim();
+            ws.Cell(r, 4).Value = (row.Location ?? string.Empty).Trim();
+            ws.Cell(r, 5).Value = FormatProducerModel(row);
+            ws.Cell(r, 6).Value = (row.SerialNumber ?? string.Empty).Trim();
+            ws.Cell(r, 7).Value = (row.AssetNo ?? string.Empty).Trim();
+            ws.Cell(r, 8).Value = (row.Status ?? string.Empty).Trim();
+            r++;
+        }
+
+        var lastRow = Math.Max(2, r - 1);
+        var range = ws.Range(1, 1, lastRow, 8);
+
+        range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        range.Style.Alignment.WrapText = false;
+
+        ws.SheetView.FreezeRows(1);
+        range.SetAutoFilter();
+        ws.Row(1).Style.Font.Bold = true;
+
+        ws.Columns(1, 8).AdjustToContents();
+
+        ws.Column(3).Width = Math.Min(ws.Column(3).Width, 40);
+        ws.Column(4).Width = Math.Min(ws.Column(4).Width, 40);
+        ws.Column(5).Width = Math.Min(ws.Column(5).Width, 45);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private async Task<IJSObjectReference> GetDownloadModuleAsync()
+    {
+        if (_downloadModule != null)
+            return _downloadModule;
+
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownload.js");
+        return _downloadModule;
+    }
+
+    private string Txt(string key, string fallback)
+    {
+        var s = L[key];
+        return s.ResourceNotFound ? fallback : s.Value;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_downloadModule != null)
+                await _downloadModule.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+}

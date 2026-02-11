@@ -1,0 +1,893 @@
+﻿@page "/assets/simcards"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Sim.View")]
+
+@* File: Components/Pages/SimCardsIndex.razor
+   Description: Lista kart SIM w oparciu o MudDataGrid. Widok spójny z Tickets/Devices/Licenses/Systems.
+                Search zawsze widoczny + Advanced filters (collapse) jak w Devices.
+                Filtry dopasowane do SIM: Type, Operator, Plan, Status, User.
+   Updated: 2025-12-29 - Edit/New przez okno modalne (MudDialog).
+   Updated: 2026-01-06 - FIX: otwieranie dialogu identycznie jak w Devices (DialogOptions + tytuł).
+   Updated: 2026-01-09 - wersja 1.03:
+     - i18n: IStringLocalizer<SimCardsIndex> (resx: SimCardsIndex.resx, SimCardsIndex.pl-PL.resx)
+     - RBAC: rozdzielenie Create/Edit/Delete. Add SIM wymaga Assets.Sim.Create, klik w wiersz wymaga Assets.Sim.Edit
+     - UX: brak redirecta na / przy braku view, pokazujemy komunikat na stronie
+     - Spójne zachowanie kursora: pointer tylko gdy jest Edit
+   Updated: 2026-01-22 - wersja 1.04:
+     - Export: eksport widocznych danych gridu do XLSX (FilteredItems + ClosedXML) + download przez JS module
+   Updated: 2026-01-24 - wersja 1.05:
+     - Grid: standard szerokości kolumn jak UsersIndex: procenty + table-layout fixed + ellipsis
+     - FIX: poprawione CellStyle (width) w kolumnie Type
+   Updated: 2026-01-24 - wersja 1.06:
+     - TimeZone: nazwa pliku eksportu liczona wg strefy czasowej użytkownika (TimeZoneService)
+   Updated: 2026-01-25 - wersja 1.07:
+     - Security: page-level policy Authorize (Perm:Assets.Sim.View)
+     - Logging: ILogger zamiast Console.Error
+     - FIX: tytuł dialogu faktycznie ustawiany (wcześniej był liczony, ale nieużyty)
+   Updated: 2026-02-08 - wersja 1.08:
+     - UX: przejście na wersję bez-dialogu (nawigacja do strony Create/Edit z returnUrl)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@implements IAsyncDisposable
+
+@inject SimCardsService SimCardsService
+@inject NavigationManager NavigationManager
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SimCardsIndex> L
+@inject IJSRuntime JS
+@inject TimeZoneService TimeZoneService
+@inject ILogger<SimCardsIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewSim)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_isLoading || _isExporting || !_canViewSim)"
+                              Class="sim-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 sim-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewSim)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewSim)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewSim)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="sim-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 sim-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Type"]"
+                                           Value="@_selectedType"
+                                           ValueChanged="OnTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var t in _lookupsTypes)
+                                    {
+                                        <MudSelectItem Value="@t">@t</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Operator"]"
+                                           Value="@_selectedOperator"
+                                           ValueChanged="OnOperatorChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var o in _lookupsOperators)
+                                    {
+                                        <MudSelectItem Value="@o">@o</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Plan"]"
+                                           Value="@_selectedPlan"
+                                           ValueChanged="OnPlanChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var p in _lookupsPlans)
+                                    {
+                                        <MudSelectItem Value="@p">@p</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Status"]"
+                                           Value="@_selectedStatus"
+                                           ValueChanged="OnStatusChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var s in _lookupsStatuses)
+                                    {
+                                        <MudSelectItem Value="@s">@s</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_User"]"
+                                           Value="@_selectedUser"
+                                           ValueChanged="OnUserChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Clearable="true"
+                                           Strict="false"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var u in _lookupsUsers)
+                                    {
+                                        <MudSelectItem Value="@u">@u</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="NewSimAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canCreateSim)">
+                        @L["AddSim"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               Class="ml-2"
+                               OnClick="ExportVisibleToExcelAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewSim || (_filteredRows?.Count ?? 0) == 0)">
+                        @Txt("ExportExcel", "Export Excel")
+                    </MudButton>
+                </MudStack>
+
+                <MudDataGrid T="SimCardEditModel"
+                             @ref="_grid"
+                             Class="sim-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             RowClick="OnRowClickedAsync"
+                             @bind-RowsPerPage="_rowsPerPage">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="SimCardEditModel" PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        @* Suma 100% *@
+                        <PropertyColumn Property="x => x.Type"
+                                        Title="@L["Col_Type"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="x => x.MobileNumber"
+                                        Title="@L["Col_MobileNumber"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:14%;"
+                                        CellStyle="width:14%;" />
+
+                        <PropertyColumn Property="x => x.SimCardNumber"
+                                        Title="@L["Col_SimCardNumber"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:16%;"
+                                        CellStyle="width:16%;" />
+
+                        <PropertyColumn Property="x => x.User"
+                                        Title="@L["Col_User"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:22%;"
+                                        CellStyle="width:22%;" />
+
+                        <PropertyColumn Property="x => x.Operator"
+                                        Title="@L["Col_Operator"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.Plan"
+                                        Title="@L["Col_Plan"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:16%;"
+                                        CellStyle="width:16%;" />
+
+                        <PropertyColumn Property="x => x.Status"
+                                        Title="@L["Col_Status"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@(_isLoading || _isExporting)"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="sim-overlay">
+                    <MudPaper Class="pa-6 sim-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @(_isExporting? Txt("Overlay_Exporting", "Eksportuję dane...") : L["Overlay_Loading"])
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .sim-row {
+        min-height: 44px;
+    }
+
+        .sim-row td,
+        .sim-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .sim-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .sim-row-clickable {
+        cursor: pointer;
+    }
+
+    .sim-search {
+        min-width: 400px;
+    }
+
+    .sim-filters-panel {
+        border-radius: 8px;
+    }
+
+    .sim-clear-btn {
+        border-width: 1px;
+    }
+
+    .sim-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .sim-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .sim-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    /* Standard dopasowania kolumn jak UsersIndex */
+    .sim-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .sim-grid th,
+    .sim-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+    private static readonly TimeSpan DataLoadTimeout = TimeSpan.FromSeconds(30);
+
+    private bool _ready;
+    private bool _isLoading = true;
+    private bool _isExporting;
+
+    private bool _canViewSim;
+    private bool _canEditSim;
+    private bool _canCreateSim;
+    private bool _canDeleteSim;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private List<SimCardEditModel> _allRows = new();
+    private List<SimCardEditModel> _filteredRows = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private string _selectedType = AllValue;
+    private string _selectedOperator = AllValue;
+    private string _selectedPlan = AllValue;
+    private string _selectedStatus = AllValue;
+    private string _selectedUser = AllValue;
+
+    private List<string> _lookupsTypes = new();
+    private List<string> _lookupsOperators = new();
+    private List<string> _lookupsPlans = new();
+    private List<string> _lookupsStatuses = new();
+    private List<string> _lookupsUsers = new();
+
+    private MudDataGrid<SimCardEditModel>? _grid;
+    private IJSObjectReference? _downloadModule;
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        _canViewSim = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Assets.Sim.View");
+        _canEditSim = _canViewSim && ctx.Has("Assets.Sim.Edit");
+        _canCreateSim = _canViewSim && ctx.Has("Assets.Sim.Create");
+        _canDeleteSim = _canViewSim && ctx.Has("Assets.Sim.Delete");
+
+        _ready = true;
+
+        if (!_canViewSim)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private async Task NewSimAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canCreateSim)
+        {
+            Snackbar.Add(L["Msg_NoCreatePermission"], Severity.Warning);
+            return;
+        }
+
+        NavigateToCreate();
+        await Task.CompletedTask;
+    }
+
+    private async Task OnRowClickedAsync(DataGridRowClickEventArgs<SimCardEditModel> args)
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (args?.Item == null)
+            return;
+
+        var id = args.Item.Id;
+        if (id <= 0)
+            return;
+
+        if (!_canEditSim)
+        {
+            Snackbar.Add(L["Msg_NoEditPermission"], Severity.Warning);
+            return;
+        }
+
+        NavigateToEdit(id);
+        await Task.CompletedTask;
+    }
+
+    private void NavigateToCreate()
+    {
+        var returnUrl = Uri.EscapeDataString(NavigationManager.Uri);
+        NavigationManager.NavigateTo($"/assets/simcards/new?returnUrl={returnUrl}");
+    }
+
+    private void NavigateToEdit(int id)
+    {
+        var returnUrl = Uri.EscapeDataString(NavigationManager.Uri);
+        NavigationManager.NavigateTo($"/assets/simcards/edit/{id}?returnUrl={returnUrl}");
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_isExporting)
+            return;
+
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            var loadTask = SimCardsService.GetSimCardsAsync();
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(DataLoadTimeout));
+
+            if (completedTask != loadTask)
+            {
+                _allRows = new List<SimCardEditModel>();
+                _filteredRows = new List<SimCardEditModel>();
+                _loadError = string.Format(L["Msg_Timeout"], (int)DataLoadTimeout.TotalSeconds);
+                Snackbar.Add(L["Msg_TimeoutSnackbar"], Severity.Error);
+                return;
+            }
+
+            var result = await loadTask;
+
+            if (!result.Ok)
+            {
+                _allRows = new List<SimCardEditModel>();
+                _filteredRows = new List<SimCardEditModel>();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add(L["Msg_LoadFailedSnackbar"], Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new List<SimCardEditModel>();
+
+            BuildLookupsFromRows();
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[SIM] Load error.");
+            Snackbar.Add(L["Msg_LoadFailedTryLater"], Severity.Error);
+
+            _allRows = new List<SimCardEditModel>();
+            _filteredRows = new List<SimCardEditModel>();
+            _loadError = L["Msg_GenericLoadError"];
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void BuildLookupsFromRows()
+    {
+        var rows = _allRows ?? new List<SimCardEditModel>();
+
+        _lookupsTypes = rows.Select(x => (x.Type ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsOperators = rows.Select(x => (x.Operator ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsPlans = rows.Select(x => (x.Plan ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsStatuses = rows.Select(x => (x.Status ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsUsers = rows.Select(x => (x.User ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedType != AllValue && !_lookupsTypes.Contains(_selectedType, StringComparer.OrdinalIgnoreCase))
+            _selectedType = AllValue;
+
+        if (_selectedOperator != AllValue && !_lookupsOperators.Contains(_selectedOperator, StringComparer.OrdinalIgnoreCase))
+            _selectedOperator = AllValue;
+
+        if (_selectedPlan != AllValue && !_lookupsPlans.Contains(_selectedPlan, StringComparer.OrdinalIgnoreCase))
+            _selectedPlan = AllValue;
+
+        if (_selectedStatus != AllValue && !_lookupsStatuses.Contains(_selectedStatus, StringComparer.OrdinalIgnoreCase))
+            _selectedStatus = AllValue;
+
+        if (_selectedUser != AllValue && !_lookupsUsers.Contains(_selectedUser, StringComparer.OrdinalIgnoreCase))
+            _selectedUser = AllValue;
+    }
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+        _selectedType = AllValue;
+        _selectedOperator = AllValue;
+        _selectedPlan = AllValue;
+        _selectedStatus = AllValue;
+        _selectedUser = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnTypeChangedAsync(string value)
+    {
+        _selectedType = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnOperatorChangedAsync(string value)
+    {
+        _selectedOperator = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnPlanChangedAsync(string value)
+    {
+        _selectedPlan = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStatusChangedAsync(string value)
+    {
+        _selectedStatus = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnUserChangedAsync(string value)
+    {
+        _selectedUser = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+        => _filteredRows = BuildFilteredRows();
+
+    private List<SimCardEditModel> BuildFilteredRows()
+    {
+        IEnumerable<SimCardEditModel> query = _allRows ?? new List<SimCardEditModel>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.Type, term) ||
+                ContainsIgnoreCase(x.MobileNumber, term) ||
+                ContainsIgnoreCase(x.SimCardNumber, term) ||
+                ContainsIgnoreCase(x.User, term) ||
+                ContainsIgnoreCase(x.Operator, term) ||
+                ContainsIgnoreCase(x.Plan, term) ||
+                ContainsIgnoreCase(x.Status, term)
+            );
+        }
+
+        if (_selectedType != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Type, _selectedType));
+
+        if (_selectedOperator != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Operator, _selectedOperator));
+
+        if (_selectedPlan != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Plan, _selectedPlan));
+
+        if (_selectedStatus != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Status, _selectedStatus));
+
+        if (_selectedUser != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.User, _selectedUser));
+
+        return query.ToList();
+    }
+
+    private static bool EqualsIgnoreCaseTrim(string? a, string b)
+        => string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetRowClass(SimCardEditModel row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditSim ? "sim-row sim-row-clickable" : "sim-row";
+    }
+
+    private async Task ExportVisibleToExcelAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canViewSim)
+        {
+            Snackbar.Add(Txt("NoViewPermission", "Brak uprawnień do podglądu SIM."), Severity.Warning);
+            return;
+        }
+
+        var exportRows = GetExportRows();
+        if (exportRows.Count == 0)
+        {
+            Snackbar.Add(Txt("Msg_NoRecordsToExport", "Brak danych do eksportu."), Severity.Info);
+            return;
+        }
+
+        _isExporting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+
+            var fileName = "sim_" + nowLocal.ToString("yyyyMMdd_HHmm") + ".xlsx";
+            var contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var bytes = BuildSimXlsx(exportRows);
+
+            var module = await GetDownloadModuleAsync();
+            var base64 = Convert.ToBase64String(bytes);
+
+            await module.InvokeVoidAsync("downloadFileFromBase64", fileName, contentType, base64);
+
+            Snackbar.Add(Txt("Msg_ExportDone", "Eksport zakończony."), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[SIM] Export error.");
+            Snackbar.Add(Txt("Msg_ExportFailed", "Eksport nieudany. Spróbuj ponownie."), Severity.Error);
+        }
+        finally
+        {
+            _isExporting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<SimCardEditModel> GetExportRows()
+    {
+        try
+        {
+            if (_grid?.FilteredItems != null)
+                return _grid.FilteredItems.Where(x => x != null).ToList();
+        }
+        catch
+        {
+        }
+
+        return (_filteredRows ?? new List<SimCardEditModel>()).Where(x => x != null).ToList();
+    }
+
+    private byte[] BuildSimXlsx(List<SimCardEditModel> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("SIM");
+
+        var hType = Txt("Col_Type", "Type");
+        var hMobile = Txt("Col_MobileNumber", "Mobile number");
+        var hSimNo = Txt("Col_SimCardNumber", "SIM number");
+        var hUser = Txt("Col_User", "User");
+        var hOperator = Txt("Col_Operator", "Operator");
+        var hPlan = Txt("Col_Plan", "Plan");
+        var hStatus = Txt("Col_Status", "Status");
+
+        ws.Cell(1, 1).Value = hType;
+        ws.Cell(1, 2).Value = hMobile;
+        ws.Cell(1, 3).Value = hSimNo;
+        ws.Cell(1, 4).Value = hUser;
+        ws.Cell(1, 5).Value = hOperator;
+        ws.Cell(1, 6).Value = hPlan;
+        ws.Cell(1, 7).Value = hStatus;
+
+        var r = 2;
+        foreach (var x in rows)
+        {
+            ws.Cell(r, 1).Value = (x.Type ?? string.Empty).Trim();
+            ws.Cell(r, 2).Value = (x.MobileNumber ?? string.Empty).Trim();
+            ws.Cell(r, 3).Value = (x.SimCardNumber ?? string.Empty).Trim();
+            ws.Cell(r, 4).Value = (x.User ?? string.Empty).Trim();
+            ws.Cell(r, 5).Value = (x.Operator ?? string.Empty).Trim();
+            ws.Cell(r, 6).Value = (x.Plan ?? string.Empty).Trim();
+            ws.Cell(r, 7).Value = (x.Status ?? string.Empty).Trim();
+            r++;
+        }
+
+        var lastRow = Math.Max(2, r - 1);
+        var range = ws.Range(1, 1, lastRow, 7);
+
+        ws.SheetView.FreezeRows(1);
+        range.SetAutoFilter();
+        ws.Row(1).Style.Font.Bold = true;
+
+        ws.Columns(1, 7).AdjustToContents();
+
+        ws.Column(2).Width = Math.Min(ws.Column(2).Width, 30);
+        ws.Column(3).Width = Math.Min(ws.Column(3).Width, 35);
+        ws.Column(4).Width = Math.Min(ws.Column(4).Width, 40);
+        ws.Column(6).Width = Math.Min(ws.Column(6).Width, 40);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private async Task<IJSObjectReference> GetDownloadModuleAsync()
+    {
+        if (_downloadModule != null)
+            return _downloadModule;
+
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownload.js");
+        return _downloadModule;
+    }
+
+    private string Txt(string key, string fallback)
+    {
+        var s = L[key];
+        return s.ResourceNotFound ? fallback : s.Value;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_downloadModule != null)
+                await _downloadModule.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+}

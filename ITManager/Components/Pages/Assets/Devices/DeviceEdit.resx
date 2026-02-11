@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="LoadingData" xml:space="preserve"><value>Loading data...</value></data>
+
+	<data name="Common.Dash" xml:space="preserve"><value>-</value></data>
+	<data name="Fallback.DeviceTitle" xml:space="preserve"><value>Device</value></data>
+
+	<data name="Summary.User" xml:space="preserve"><value>User</value></data>
+	<data name="Summary.IP" xml:space="preserve"><value>IP</value></data>
+	<data name="Summary.Location" xml:space="preserve"><value>Location</value></data>
+	<data name="Summary.AssetNo" xml:space="preserve"><value>Asset No</value></data>
+
+	<data name="Label.IP" xml:space="preserve"><value>IP</value></data>
+	<data name="Label.AssetNo" xml:space="preserve"><value>Asset No</value></data>
+
+	<data name="Tooltip.CopyIP" xml:space="preserve"><value>Copy IP</value></data>
+	<data name="Tooltip.CopyAssetNo" xml:space="preserve"><value>Copy Asset No</value></data>
+
+	<data name="Tab.General" xml:space="preserve"><value>General</value></data>
+	<data name="Tab.Network" xml:space="preserve"><value>Network</value></data>
+	<data name="Tab.UserLocation" xml:space="preserve"><value>User and Location</value></data>
+	<data name="Tab.Warranty" xml:space="preserve"><value>Warranty</value></data>
+	<data name="Tab.Assets" xml:space="preserve"><value>Assets</value></data>
+	<data name="Tab.Note" xml:space="preserve"><value>Note</value></data>
+	<data name="Tab.History" xml:space="preserve"><value>History</value></data>
+
+	<data name="Field.Type" xml:space="preserve"><value>Type</value></data>
+	<data name="Field.Kind" xml:space="preserve"><value>Kind</value></data>
+	<data name="Field.Status" xml:space="preserve"><value>Status</value></data>
+	<data name="Field.Producer" xml:space="preserve"><value>Producer</value></data>
+	<data name="Field.Model" xml:space="preserve"><value>Model</value></data>
+	<data name="Field.SerialNumber" xml:space="preserve"><value>Serial number</value></data>
+	<data name="Field.Hostname" xml:space="preserve"><value>Hostname</value></data>
+	<data name="Field.IPAddress" xml:space="preserve"><value>IP address</value></data>
+	<data name="Field.MacEthernet" xml:space="preserve"><value>MAC (Ethernet)</value></data>
+	<data name="Field.MacWlan" xml:space="preserve"><value>MAC (WLAN)</value></data>
+	<data name="Field.IMEI1" xml:space="preserve"><value>IMEI 1</value></data>
+	<data name="Field.IMEI2" xml:space="preserve"><value>IMEI 2</value></data>
+	<data name="Field.User" xml:space="preserve"><value>User</value></data>
+	<data name="Field.Location" xml:space="preserve"><value>Location</value></data>
+	<data name="Field.WarrantyStart" xml:space="preserve"><value>Warranty start</value></data>
+	<data name="Field.WarrantyEnd" xml:space="preserve"><value>End of warranty</value></data>
+	<data name="Field.InventoryNo" xml:space="preserve"><value>Inventory No</value></data>
+	<data name="Field.AssetNo" xml:space="preserve"><value>Asset No</value></data>
+	<data name="Field.Note" xml:space="preserve"><value>Note</value></data>
+
+	<data name="Action.Lock" xml:space="preserve"><value>Lock</value></data>
+	<data name="Action.EnableEdit" xml:space="preserve"><value>Enable edit</value></data>
+	<data name="Action.CancelChanges" xml:space="preserve"><value>Cancel changes</value></data>
+	<data name="Action.Save" xml:space="preserve"><value>Save</value></data>
+	<data name="Action.Close" xml:space="preserve"><value>Close</value></data>
+
+	<data name="Confirm.Unsaved.Title" xml:space="preserve"><value>Unsaved changes</value></data>
+	<data name="Confirm.Unsaved.Message" xml:space="preserve"><value>You have unsaved changes. Close and discard them?</value></data>
+	<data name="Confirm.Unsaved.Yes" xml:space="preserve"><value>Discard and close</value></data>
+	<data name="Confirm.Unsaved.Cancel" xml:space="preserve"><value>Stay</value></data>
+
+	<data name="History.NotImplemented" xml:space="preserve"><value>History: not implemented yet (change log, audit, events).</value></data>
+
+	<data name="Subtitle.Format" xml:space="preserve"><value>{0} (SN: {1})</value></data>
+	<data name="Warranty.Ends.Format" xml:space="preserve"><value>Warranty ends: {0:yyyy-MM-dd} ({1}d)</value></data>
+	<data name="Warranty.Ended.Format" xml:space="preserve"><value>Warranty ended: {0:yyyy-MM-dd} ({1}d)</value></data>
+
+	<data name="Error.Lookups.LoadFailed" xml:space="preserve"><value>Failed to load lookups.</value></data>
+	<data name="Error.Device.LoadFailed" xml:space="preserve"><value>Failed to load device.</value></data>
+	<data name="Error.Device.LoadTryLater" xml:space="preserve"><value>Failed to load device. Please try again later.</value></data>
+	<data name="Error.Device.NotFoundById" xml:space="preserve"><value>Device not found for Id: {0}</value></data>
+
+	<data name="Snackbar.Saved" xml:space="preserve"><value>Saved.</value></data>
+	<data name="Snackbar.SaveFailed" xml:space="preserve"><value>Failed to save changes.</value></data>
+	<data name="Snackbar.SaveError" xml:space="preserve"><value>Save error.</value></data>
+	<data name="Snackbar.RevertFailed" xml:space="preserve"><value>Failed to revert changes.</value></data>
+
+	<data name="Snackbar.CopiedFormat" xml:space="preserve"><value>Copied: {0}</value></data>
+	<data name="Snackbar.CopyFailed" xml:space="preserve"><value>Failed to copy to clipboard.</value></data>
+</root>

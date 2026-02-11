@@ -1,0 +1,953 @@
+﻿@page "/assets/simcards/new"
+@page "/assets/simcards/edit/{Id:int}"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Sim.View")]
+
+@* File: Components/Pages/Assets/SimCards/SimCardEdit.razor
+   Description: Ekran dodawania i edycji karty SIM (bez dialogu). UX spójny z DeviceEditDialog:
+                Summary + zakładki ze scrollem, start w trybie read-only (dla istniejących),
+                Enable edit odblokowuje edycję, listy z wyszukiwaniem (MudAutocomplete),
+                słowniki pobierane z bazy przez GetSimCardsFilterLookupsAsync().
+   Version: 1.03
+   Updated: 2026-02-09
+   Change log:
+     - 1.03 (2026-02-09) i18n: dodany IStringLocalizer + klucze do resx, usunięte twarde stringi z UI.
+     - 1.02 (2026-02-09) UX: usunięty nagłówek (title+refresh+cancel), usunięte wycofywanie zmian,
+                              kontener full-width jak inne podstrony (bez max-width i centrowania).
+*@
+
+@using System
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using System.Collections.Generic
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Extensions.Localization
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject SimCardsService SimCardsService
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject IStringLocalizer<SimCardEdit> L
+
+<MudPaper Class="pa-4 sim-edit-root" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @if (!_canViewSim)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true">
+                @L["NoAccess.View"]
+            </MudAlert>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                    @_errorMessage
+                </MudAlert>
+            }
+
+            @if (_isLoading)
+            {
+                <MudPaper Class="pa-6" Elevation="0">
+                    <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="sim-loading">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1" Class="mt-2">@L["Loading.Data"]</MudText>
+                    </MudStack>
+                </MudPaper>
+            }
+            else
+            {
+                <MudPaper Elevation="0" Class="sim-summary">
+                    <MudStack Spacing="1">
+
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="sim-summary-top">
+                            <MudText Typo="Typo.h6" Class="sim-summary-title">
+                                @BuildSimTitle()
+                            </MudText>
+
+                            @if (!string.IsNullOrWhiteSpace(GetSafe(_edit.Type)))
+                            {
+                                <MudChip T="string" Variant="Variant.Filled" Color="Color.Primary" Class="ml-2">
+                                    @GetSafe(_edit.Type)
+                                </MudChip>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(GetSafe(_edit.Status)))
+                            {
+                                <MudChip T="string"
+                                         Variant="Variant.Outlined"
+                                         Color="@GetStatusChipColor(_edit.Status)"
+                                         Class="ml-2">
+                                    @GetSafe(_edit.Status)
+                                </MudChip>
+                            }
+
+                            @if (!_canEditSim)
+                            {
+                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" Class="ml-2">
+                                    @L["Badge.ReadOnly"]
+                                </MudChip>
+                            }
+
+                            @if (_isEditEnabled && _canEditSim && _isDirty)
+                            {
+                                <MudChip T="string" Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" Class="ml-2">
+                                    @L["Badge.Unsaved"]
+                                </MudChip>
+                            }
+
+                            <MudSpacer />
+                        </MudStack>
+
+                        <MudText Typo="Typo.body2" Class="sim-summary-subtitle">
+                            @BuildSimSubtitle()
+                        </MudText>
+
+                        <MudGrid Spacing="1" AlignItems="AlignItems.Center" Class="sim-summary-grid">
+
+                            <MudItem xs="12" sm="6" md="6" Class="sim-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="sim-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>@L["Field.User"]:</b> @GetSafe(_edit.User, L["Common.Dash"])
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="sim-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="sim-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.PhoneAndroid" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>@L["Field.MobileNumberShort"]:</b> <span class="sim-mono">@GetSafe(_edit.MobileNumber, L["Common.Dash"])</span>
+                                    </MudText>
+
+                                    <MudTooltip Text="@L["Tooltip.CopyMobile"]">
+                                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                       Size="Size.Medium"
+                                                       Color="Color.Default"
+                                                       Variant="Variant.Text"
+                                                       Disabled="@string.IsNullOrWhiteSpace(GetSafe(_edit.MobileNumber))"
+                                                       Class="ml-1"
+                                                       OnClick="@(() => CopyToClipboardAsync(_edit.MobileNumber, L["Clipboard.Mobile"]))" />
+                                    </MudTooltip>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="sim-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="sim-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.SimCard" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>@L["Field.SimCardNumberShort"]:</b> <span class="sim-mono">@GetSafe(_edit.SimCardNumber, L["Common.Dash"])</span>
+                                    </MudText>
+
+                                    <MudTooltip Text="@L["Tooltip.CopySim"]">
+                                        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                       Size="Size.Medium"
+                                                       Color="Color.Default"
+                                                       Variant="Variant.Text"
+                                                       Disabled="@string.IsNullOrWhiteSpace(GetSafe(_edit.SimCardNumber))"
+                                                       Class="ml-1"
+                                                       OnClick="@(() => CopyToClipboardAsync(_edit.SimCardNumber, L["Clipboard.Sim"]))" />
+                                    </MudTooltip>
+                                </MudStack>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="6" Class="sim-summary-cell">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="sim-summary-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Business" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        <b>@L["Field.Operator"]:</b> @GetSafe(_edit.Operator, L["Common.Dash"])
+                                    </MudText>
+                                </MudStack>
+                            </MudItem>
+
+                        </MudGrid>
+
+                    </MudStack>
+                </MudPaper>
+
+                <MudPaper Elevation="0" Class="sim-tabs">
+                    <MudTabs Rounded="true" Elevation="0" KeepPanelsAlive="true">
+
+                        <MudTabPanel Text="@L["Tab.General"]">
+                            <div class="sim-tab-scroll">
+                                <MudForm @ref="_form">
+                                    <MudGrid Spacing="2">
+
+                                        <MudItem xs="12" md="4">
+                                            @if (_isEditEnabled)
+                                            {
+                                                <MudAutocomplete T="string"
+                                                                 Label="@L["Field.Type"]"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Disabled="@IsUiLocked"
+                                                                 Clearable="true"
+                                                                 Value="@_edit.Type"
+                                                                 ValueChanged="v => SetEditString(x => _edit.Type = x, v)"
+                                                                 SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_typeOptions, s, ct) )"
+                                                                 DebounceInterval="150"
+                                                                 CoerceText="true"
+                                                                 ResetValueOnEmptyText="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Type"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_edit.Type, L["Common.Dash"])"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            }
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="4">
+                                            @if (_isEditEnabled)
+                                            {
+                                                <MudAutocomplete T="string"
+                                                                 Label="@L["Field.Operator"]"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Disabled="@IsUiLocked"
+                                                                 Clearable="true"
+                                                                 Value="@_edit.Operator"
+                                                                 ValueChanged="v => SetEditString(x => _edit.Operator = x, v)"
+                                                                 SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_operatorOptions, s, ct) )"
+                                                                 DebounceInterval="150"
+                                                                 CoerceText="true"
+                                                                 ResetValueOnEmptyText="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Operator"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_edit.Operator, L["Common.Dash"])"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            }
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="4">
+                                            @if (_isEditEnabled)
+                                            {
+                                                <MudAutocomplete T="string"
+                                                                 Label="@L["Field.Plan"]"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Disabled="@IsUiLocked"
+                                                                 Clearable="true"
+                                                                 Value="@_edit.Plan"
+                                                                 ValueChanged="v => SetEditString(x => _edit.Plan = x, v)"
+                                                                 SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_planOptions, s, ct) )"
+                                                                 DebounceInterval="150"
+                                                                 CoerceText="true"
+                                                                 ResetValueOnEmptyText="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Plan"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_edit.Plan, L["Common.Dash"])"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            }
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="4">
+                                            @if (_isEditEnabled)
+                                            {
+                                                <MudAutocomplete T="string"
+                                                                 Label="@L["Field.Status"]"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Disabled="@IsUiLocked"
+                                                                 Clearable="true"
+                                                                 Value="@_edit.Status"
+                                                                 ValueChanged="v => SetEditString(x => _edit.Status = x, v)"
+                                                                 SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_statusOptions, s, ct) )"
+                                                                 DebounceInterval="150"
+                                                                 CoerceText="true"
+                                                                 ResetValueOnEmptyText="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Status"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_edit.Status, L["Common.Dash"])"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            }
+                                        </MudItem>
+
+                                        <MudItem xs="12" md="8">
+                                            @if (_isEditEnabled)
+                                            {
+                                                <MudAutocomplete T="string"
+                                                                 Label="@L["Field.User"]"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Disabled="@IsUiLocked"
+                                                                 Clearable="true"
+                                                                 Value="@_edit.User"
+                                                                 ValueChanged="v => SetEditString(x => _edit.User = x, v)"
+                                                                 SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_userOptions, s, ct) )"
+                                                                 DebounceInterval="150"
+                                                                 CoerceText="true"
+                                                                 ResetValueOnEmptyText="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.User"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_edit.User, L["Common.Dash"])"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            }
+                                        </MudItem>
+
+                                    </MudGrid>
+                                </MudForm>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="@L["Tab.Numbers"]">
+                            <div class="sim-tab-scroll">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.MobileNumber"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="@(!_isEditEnabled)"
+                                                      Disabled="@IsUiLocked"
+                                                      Value="@_edit.MobileNumber"
+                                                      ValueChanged="v => SetEditString(x => _edit.MobileNumber = x, v)"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.SimCardNumber"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="@(!_isEditEnabled)"
+                                                      Disabled="@IsUiLocked"
+                                                      Value="@_edit.SimCardNumber"
+                                                      ValueChanged="v => SetEditString(x => _edit.SimCardNumber = x, v)"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    </MudItem>
+
+                                </MudGrid>
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="@L["Tab.Note"]">
+                            <div class="sim-tab-scroll">
+                                <MudTextField T="string"
+                                              Label="@L["Field.NoteLabelBlank"]"
+                                              Lines="16"
+                                              AutoGrow="false"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              ReadOnly="@(!_isEditEnabled)"
+                                              Disabled="@IsUiLocked"
+                                              Value="@_edit.Note"
+                                              ValueChanged="v => SetEditString(x => _edit.Note = x, v)"
+                                              Adornment="@LockAdornment"
+                                              AdornmentIcon="@LockIcon"
+                                              AdornmentColor="Color.Default" />
+                            </div>
+                        </MudTabPanel>
+
+                        <MudTabPanel Text="@L["Tab.History"]">
+                            <div class="sim-tab-scroll">
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                    @L["History.Todo"]
+                                </MudAlert>
+                            </div>
+                        </MudTabPanel>
+
+                    </MudTabs>
+                </MudPaper>
+
+                <MudPaper Elevation="0" Class="sim-footer">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="sim-footer-inner">
+
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="@(_isEditEnabled ? Color.Default : Color.Primary)"
+                                   StartIcon="@(_isEditEnabled ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                                   OnClick="ToggleEditMode"
+                                   Disabled="@(_isLoading || _isSaving || !_canEditSim)">
+                            @(_isEditEnabled? L["Button.Lock"] : L["Button.EnableEdit"])
+                        </MudButton>
+
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       OnClick="SaveAsync"
+                                       Disabled="@(!_isEditEnabled || _isLoading || _isSaving || !_isDirty || !_canEditSim)">
+                                @L["Button.Save"]
+                            </MudButton>
+
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Close"
+                                       OnClick="CloseAsync"
+                                       Disabled="@(_isSaving)">
+                                @L["Button.Close"]
+                            </MudButton>
+                        </MudStack>
+
+                    </MudStack>
+                </MudPaper>
+
+                <MudOverlay Visible="@(_isSaving)" DarkBackground="true" AutoClose="false" Class="sim-overlay">
+                    <MudPaper Class="pa-6 sim-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">@L["Saving"]</MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+            }
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .sim-edit-root {
+        width: 100%;
+        max-width: none;
+        margin-left: 0;
+        margin-right: 0;
+        position: relative;
+        padding-bottom: 78px;
+    }
+
+    .sim-loading {
+        height: 360px;
+    }
+
+    .sim-summary {
+        padding: 14px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        box-sizing: border-box;
+    }
+
+    .sim-summary-top {
+        min-width: 0;
+    }
+
+    .sim-summary-title {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sim-summary-subtitle {
+        opacity: 0.85;
+        margin-top: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sim-summary-grid {
+        margin-top: 6px;
+    }
+
+    .sim-summary-cell {
+        display: flex;
+        min-width: 0;
+    }
+
+    .sim-summary-item {
+        width: 100%;
+        min-height: 30px;
+        line-height: 1.2;
+        min-width: 0;
+    }
+
+    .sim-tabs {
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        min-height: 520px;
+    }
+
+    .sim-tab-scroll {
+        height: 100%;
+        overflow: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .sim-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .sim-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: var(--mud-palette-surface);
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        box-sizing: border-box;
+    }
+
+    .sim-footer-inner {
+        min-width: 0;
+    }
+
+    .sim-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .sim-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+</style>
+
+@code
+{
+    [Parameter] public int Id { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSaving;
+
+    private bool _isNew;
+    private bool _isEditEnabled;
+
+    private bool _isDirty;
+    private string _originalEditJson = string.Empty;
+
+    private bool _canViewSim;
+    private bool _canEditSim;
+
+    private string _errorMessage = string.Empty;
+
+    private MudForm? _form;
+
+    private ITManager.Models.SimCardEditModel _edit = new();
+
+    private List<string> _typeOptions = new();
+    private List<string> _operatorOptions = new();
+    private List<string> _planOptions = new();
+    private List<string> _statusOptions = new();
+    private List<string> _userOptions = new();
+
+    private bool IsUiLocked => _isSaving || !_canEditSim;
+
+    private Adornment LockAdornment => !_isEditEnabled ? Adornment.End : Adornment.None;
+    private string? LockIcon => !_isEditEnabled ? Icons.Material.Filled.Lock : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            if (ctx == null || !ctx.IsAuthenticated || ctx.IsActive != true || !ctx.Has("Assets.Sim.View"))
+            {
+                _canViewSim = false;
+                _canEditSim = false;
+                return;
+            }
+
+            _canViewSim = true;
+
+            _isNew = Id <= 0;
+            var canCreate = ctx.Has("Assets.Sim.Create");
+            var canEdit = ctx.Has("Assets.Sim.Edit");
+
+            _canEditSim = _isNew ? canCreate : canEdit;
+
+            await LoadLookupsAsync();
+            await LoadAsync();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void ToggleEditMode()
+    {
+        if (_isLoading || _isSaving || !_canEditSim)
+            return;
+
+        _isEditEnabled = !_isEditEnabled;
+
+        if (!_isEditEnabled)
+            _isDirty = false;
+    }
+
+    private string BuildSimTitle()
+    {
+        var sim = GetSafe(_edit.SimCardNumber);
+        if (!string.IsNullOrWhiteSpace(sim))
+            return $"{L["Title.SimPrefix"]} {sim}";
+
+        var mobile = GetSafe(_edit.MobileNumber);
+        if (!string.IsNullOrWhiteSpace(mobile))
+            return $"{L["Title.SimPrefix"]} {mobile}";
+
+        return L["Title.SimCard"];
+    }
+
+    private string BuildSimSubtitle()
+    {
+        var op = GetSafe(_edit.Operator, L["Common.Dash"]);
+        var plan = GetSafe(_edit.Plan, L["Common.Dash"]);
+        return string.Format(L["Subtitle.OperatorPlan"], op, plan);
+    }
+
+    private Color GetStatusChipColor(string? status)
+    {
+        var s = (status ?? string.Empty).Trim();
+        if (s.Equals("Active", StringComparison.OrdinalIgnoreCase))
+            return Color.Success;
+
+        return Color.Default;
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        try
+        {
+            var result = await SimCardsService.GetSimCardsFilterLookupsAsync();
+            if (!result.Ok)
+            {
+                ClearOptions();
+                _errorMessage = result.ErrorMessage ?? L["Error.LoadLookups"];
+                return;
+            }
+
+            var l = result.Lookups ?? new SimCardsFilterLookups();
+
+            _typeOptions = NormalizeOptions(l.Types);
+            _operatorOptions = NormalizeOptions(l.Operators);
+            _planOptions = NormalizeOptions(l.Plans);
+            _statusOptions = NormalizeOptions(l.Statuses);
+            _userOptions = NormalizeOptions(l.Users);
+        }
+        catch
+        {
+            ClearOptions();
+            _errorMessage = L["Error.LoadLookups"];
+        }
+    }
+
+    private void ClearOptions()
+    {
+        _typeOptions = new();
+        _operatorOptions = new();
+        _planOptions = new();
+        _statusOptions = new();
+        _userOptions = new();
+    }
+
+    private static List<string> NormalizeOptions(IEnumerable<string>? source)
+    {
+        return (source ?? Enumerable.Empty<string>())
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorMessage = string.Empty;
+        _isDirty = false;
+
+        try
+        {
+            _isNew = Id <= 0;
+
+            if (_isNew)
+            {
+                _edit = new ITManager.Models.SimCardEditModel { Id = 0 };
+                SnapshotOriginal();
+                _isEditEnabled = _canEditSim;
+                return;
+            }
+
+            var get = await SimCardsService.GetSimCardByIdAsync(Id);
+            if (!get.Ok)
+            {
+                _errorMessage = get.ErrorMessage ?? L["Error.LoadSimCard"];
+                _edit = new ITManager.Models.SimCardEditModel();
+                SnapshotOriginal();
+                _isEditEnabled = false;
+                return;
+            }
+
+            if (get.Row == null)
+            {
+                _errorMessage = string.Format(L["Error.NotFoundById"], Id);
+                _edit = new ITManager.Models.SimCardEditModel();
+                SnapshotOriginal();
+                _isEditEnabled = false;
+                return;
+            }
+
+            _edit = new ITManager.Models.SimCardEditModel
+            {
+                Id = get.Row.Id,
+                Type = get.Row.Type ?? string.Empty,
+                Operator = get.Row.Operator ?? string.Empty,
+                Plan = get.Row.Plan ?? string.Empty,
+                Status = get.Row.Status ?? string.Empty,
+                User = get.Row.User ?? string.Empty,
+                MobileNumber = get.Row.MobileNumber ?? string.Empty,
+                SimCardNumber = get.Row.SimCardNumber ?? string.Empty,
+                Note = get.Row.Note ?? string.Empty
+            };
+
+            SnapshotOriginal();
+            _isEditEnabled = false;
+        }
+        catch
+        {
+            _errorMessage = L["Error.LoadSimCardTryLater"];
+            _edit = new ITManager.Models.SimCardEditModel();
+            SnapshotOriginal();
+            _isEditEnabled = false;
+        }
+    }
+
+    private void SnapshotOriginal()
+    {
+        _originalEditJson = SerializeEdit(_edit);
+        _isDirty = false;
+    }
+
+    private void MarkDirty()
+    {
+        if (string.IsNullOrWhiteSpace(_originalEditJson))
+        {
+            _isDirty = true;
+            return;
+        }
+
+        var current = SerializeEdit(_edit);
+        _isDirty = !string.Equals(_originalEditJson, current, StringComparison.Ordinal);
+    }
+
+    private static string SerializeEdit(ITManager.Models.SimCardEditModel model)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = null
+        };
+
+        return JsonSerializer.Serialize(model ?? new ITManager.Models.SimCardEditModel(), options);
+    }
+
+    private void SetEditString(Action<string> setter, string? value)
+    {
+        var v = value ?? string.Empty;
+        setter(v);
+        MarkDirty();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_canViewSim || !_canEditSim)
+        {
+            Snackbar.Add(L["NoAccess.Edit"], Severity.Warning);
+            NavigateBack();
+            return;
+        }
+
+        if (!_isEditEnabled || _isLoading || _isSaving || !_isDirty)
+            return;
+
+        _isSaving = true;
+
+        try
+        {
+            if (_form != null)
+                await _form.Validate();
+
+            var payload = new ITManager.Models.SimCardEditModel
+            {
+                Id = _isNew ? 0 : _edit.Id,
+                Type = (_edit.Type ?? string.Empty).Trim(),
+                Operator = (_edit.Operator ?? string.Empty).Trim(),
+                Plan = (_edit.Plan ?? string.Empty).Trim(),
+                Status = (_edit.Status ?? string.Empty).Trim(),
+                User = (_edit.User ?? string.Empty).Trim(),
+                MobileNumber = (_edit.MobileNumber ?? string.Empty).Trim(),
+                SimCardNumber = (_edit.SimCardNumber ?? string.Empty).Trim(),
+                Note = _edit.Note ?? string.Empty
+            };
+
+            if (_isNew || payload.Id <= 0)
+            {
+                var created = await SimCardsService.CreateSimCardAsync(payload);
+                if (!created.Ok)
+                {
+                    Snackbar.Add(created.ErrorMessage ?? L["Error.Save"], Severity.Error);
+                    return;
+                }
+
+                Snackbar.Add(L["Toast.Saved"], Severity.Success);
+                NavigateBack();
+                return;
+            }
+
+            var updated = await SimCardsService.UpdateSimCardAsync(payload);
+            if (!updated.Ok)
+            {
+                Snackbar.Add(updated.ErrorMessage ?? L["Error.Save"], Severity.Error);
+                return;
+            }
+
+            Snackbar.Add(L["Toast.Saved"], Severity.Success);
+            NavigateBack();
+        }
+        catch
+        {
+            Snackbar.Add(L["Error.SaveGeneric"], Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_isSaving)
+            return;
+
+        if (_isEditEnabled && _isDirty)
+        {
+            var discard = await DialogService.ShowMessageBox(
+                title: L["Dialog.Unsaved.Title"],
+                message: L["Dialog.Unsaved.Message"],
+                yesText: L["Dialog.Unsaved.YesDiscard"],
+                cancelText: L["Dialog.Unsaved.NoStay"]
+            );
+
+            if (discard != true)
+                return;
+        }
+
+        NavigateBack();
+    }
+
+    private void NavigateBack()
+        => Nav.NavigateTo("/assets/simcards");
+
+    private async Task CopyToClipboardAsync(string? value, string label)
+    {
+        var v = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(v))
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", v);
+            Snackbar.Add(string.Format(L["Toast.Copied"], label), Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add(L["Error.CopyClipboard"], Severity.Error);
+        }
+    }
+
+    private static Task<IEnumerable<string>> SearchInOptionsAsync(List<string> options, string? search, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var list = options ?? new List<string>();
+        var s = (search ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(s))
+            return Task.FromResult<IEnumerable<string>>(list);
+
+        var filtered = list
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x.Contains(s, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<string>>(filtered);
+    }
+
+    private static string GetSafe(string? value, string fallback = "")
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? fallback : v;
+    }
+}

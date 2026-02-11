@@ -1,0 +1,178 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Header -->
+	<data name="Title" xml:space="preserve">
+    <value>Ticket scheduler</value>
+  </data>
+	<data name="Subtitle" xml:space="preserve">
+    <value>Templates and run history for automated ticket creation</value>
+  </data>
+
+	<!-- Tabs -->
+	<data name="Tab_Definitions" xml:space="preserve">
+    <value>Definitions</value>
+  </data>
+	<data name="Tab_Runs" xml:space="preserve">
+    <value>Runs</value>
+  </data>
+
+	<!-- Buttons -->
+	<data name="NewDefinition" xml:space="preserve">
+    <value>New definition</value>
+  </data>
+
+	<!-- Grid: Definitions columns -->
+	<data name="Col_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+	<data name="Col_NextRunLocal" xml:space="preserve">
+    <value>Next run</value>
+  </data>
+	<data name="Col_LastRunLocal" xml:space="preserve">
+    <value>Last run</value>
+  </data>
+	<data name="Col_Requester" xml:space="preserve">
+    <value>Requester</value>
+  </data>
+	<data name="Col_Category" xml:space="preserve">
+    <value>Category</value>
+  </data>
+	<data name="Col_Impact" xml:space="preserve">
+    <value>Impact</value>
+  </data>
+	<data name="Col_Urgency" xml:space="preserve">
+    <value>Urgency</value>
+  </data>
+	<data name="Col_Priority" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+
+	<!-- Grid: Runs columns -->
+	<data name="Col_RunAtLocal" xml:space="preserve">
+    <value>Run at</value>
+  </data>
+	<data name="Col_Definition" xml:space="preserve">
+    <value>Definition</value>
+  </data>
+	<data name="Col_Result" xml:space="preserve">
+    <value>Result</value>
+  </data>
+	<data name="Col_TicketId" xml:space="preserve">
+    <value>Ticket ID</value>
+  </data>
+	<data name="Col_Message" xml:space="preserve">
+    <value>Message</value>
+  </data>
+
+	<!-- Empty states -->
+	<data name="NoDefinitions" xml:space="preserve">
+    <value>No definitions found.</value>
+  </data>
+	<data name="NoRuns" xml:space="preserve">
+    <value>No runs to display.</value>
+  </data>
+
+	<!-- Overlay -->
+	<data name="LoadingData" xml:space="preserve">
+    <value>Loading data...</value>
+  </data>
+
+	<!-- Context / permissions -->
+	<data name="Msg_NoUserIdInContext" xml:space="preserve">
+    <value>User is not mapped to dbo.users (UserId).</value>
+  </data>
+	<data name="Msg_LoadingError" xml:space="preserve">
+    <value>Loading error: {0}</value>
+  </data>
+
+	<!-- Requester -->
+	<data name="InactiveSuffix" xml:space="preserve">
+    <value>(inactive)</value>
+  </data>
+
+	<!-- Impact -->
+	<data name="Impact_Info" xml:space="preserve">
+    <value>Info</value>
+  </data>
+	<data name="Impact_Low" xml:space="preserve">
+    <value>Low</value>
+  </data>
+	<data name="Impact_Medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+	<data name="Impact_High" xml:space="preserve">
+    <value>High</value>
+  </data>
+	<data name="Impact_Critical" xml:space="preserve">
+    <value>Critical</value>
+  </data>
+
+	<!-- Urgency -->
+	<data name="Urgency_Low" xml:space="preserve">
+    <value>Low</value>
+  </data>
+	<data name="Urgency_Medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+	<data name="Urgency_High" xml:space="preserve">
+    <value>High</value>
+  </data>
+	<data name="Urgency_Critical" xml:space="preserve">
+    <value>Critical</value>
+  </data>
+
+	<!-- Dialog -->
+	<data name="Dialog_Definition" xml:space="preserve">
+    <value>Scheduler definition</value>
+  </data>
+
+	<!-- Defaults for new definition -->
+	<data name="Default_NewDefinitionName" xml:space="preserve">
+    <value>New definition</value>
+  </data>
+	<data name="Default_TitleTemplate" xml:space="preserve">
+    <value>Automated ticket</value>
+  </data>
+	<data name="Default_DescriptionTemplate" xml:space="preserve">
+    <value>Created automatically by the scheduler.</value>
+  </data>
+
+	<!-- Editing -->
+	<data name="Msg_DefinitionNotFound" xml:space="preserve">
+    <value>Definition not found.</value>
+  </data>
+
+	<!-- Run results -->
+	<data name="Result_Created" xml:space="preserve">
+    <value>Created</value>
+  </data>
+	<data name="Result_Skipped" xml:space="preserve">
+    <value>Skipped</value>
+  </data>
+	<data name="Result_Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+	<data name="Result_NoOp" xml:space="preserve">
+    <value>No action</value>
+  </data>
+	<data name="Result_Failed" xml:space="preserve">
+    <value>Failed</value>
+  </data>
+	<data name="Result_Other" xml:space="preserve">
+    <value>Other</value>
+  </data>
+
+</root>

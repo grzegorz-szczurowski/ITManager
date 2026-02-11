@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>Umowy</value>
+  </data>
+
+	<!-- Toolbar -->
+	<data name="Refresh_AriaLabel" xml:space="preserve">
+    <value>Odśwież</value>
+  </data>
+	<data name="Search_Placeholder" xml:space="preserve">
+    <value>Szukaj w umowach</value>
+  </data>
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Wyczyść filtry</value>
+  </data>
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Filtry zaawansowane</value>
+  </data>
+
+	<!-- RBAC -->
+	<data name="NoPermission_View" xml:space="preserve">
+    <value>Brak uprawnień do podglądu umów.</value>
+  </data>
+	<data name="NoPermission_Edit" xml:space="preserve">
+    <value>Brak uprawnień do edycji umów.</value>
+  </data>
+
+	<!-- Errors / loading -->
+	<data name="Loading" xml:space="preserve">
+    <value>Ładowanie danych...</value>
+  </data>
+	<data name="LoadError_Generic" xml:space="preserve">
+    <value>Błąd podczas ładowania danych.</value>
+  </data>
+	<data name="LoadError_Timeout" xml:space="preserve">
+    <value>Przekroczono czas ładowania danych ({0}s). Sprawdź SQL i logi serwera.</value>
+  </data>
+	<data name="Snackbar_Timeout" xml:space="preserve">
+    <value>Przekroczono czas ładowania umów.</value>
+  </data>
+	<data name="Snackbar_LoadFailed" xml:space="preserve">
+    <value>Nie udało się wczytać umów.</value>
+  </data>
+	<data name="Snackbar_LoadFailedLater" xml:space="preserve">
+    <value>Nie udało się wczytać umów. Spróbuj ponownie później.</value>
+  </data>
+
+	<!-- Filters -->
+	<data name="Filter_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+	<data name="Filter_Supplier" xml:space="preserve">
+    <value>Dostawca</value>
+  </data>
+	<data name="Filter_Owner" xml:space="preserve">
+    <value>Właściciel</value>
+  </data>
+	<data name="Filter_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Filter_Validity" xml:space="preserve">
+    <value>Ważność</value>
+  </data>
+
+	<data name="Filter_All" xml:space="preserve">
+    <value>Wszystkie</value>
+  </data>
+
+	<data name="Validity_Active" xml:space="preserve">
+    <value>Aktywne</value>
+  </data>
+	<data name="Validity_Expired" xml:space="preserve">
+    <value>Wygasłe</value>
+  </data>
+	<data name="Validity_EndsSoon" xml:space="preserve">
+    <value>Kończy się wkrótce (30 dni)</value>
+  </data>
+	<data name="Validity_NoDates" xml:space="preserve">
+    <value>Brak dat</value>
+  </data>
+
+	<!-- Grid columns -->
+	<data name="Col_AgreementName" xml:space="preserve">
+    <value>Nazwa umowy</value>
+  </data>
+	<data name="Col_Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+	<data name="Col_Supplier" xml:space="preserve">
+    <value>Dostawca</value>
+  </data>
+	<data name="Col_Owner" xml:space="preserve">
+    <value>Właściciel</value>
+  </data>
+	<data name="Col_ValidFrom" xml:space="preserve">
+    <value>Ważna od</value>
+  </data>
+	<data name="Col_ValidTo" xml:space="preserve">
+    <value>Ważna do</value>
+  </data>
+	<data name="Col_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<!-- No records -->
+	<data name="NoRecords" xml:space="preserve">
+    <value>Brak umów dla aktualnych filtrów.</value>
+  </data>
+
+	<!-- Navigation / validation -->
+	<data name="OpenEdit_InvalidId" xml:space="preserve">
+    <value>Nie można otworzyć edycji, bo Id jest nieprawidłowe dla tego rekordu.</value>
+  </data>
+</root>

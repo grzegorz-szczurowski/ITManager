@@ -1,0 +1,1268 @@
+﻿@page "/assets/devices/{Id:int}"
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Policy = "Perm:Assets.Devices.View")]
+
+@namespace ITManager.Components.Pages.Assets.Devices
+
+@* File: Components/Pages/Assets/Devices/DeviceEdit.razor
+   Description: Strona szczegółów urządzenia (bez okna dialogowego). Układ i logika jak wcześniej w DeviceEditDialog.
+                Start w trybie read-only, przycisk Enable edit odblokowuje edycję.
+                Create mode: Id=0.
+   Version: 1.02
+   Created: 2026-02-08
+   Change log:
+   - 1.00 (2026-02-08) Migracja z DeviceEditDialog do strony. Rezygnacja z okien dialogowych, zamknięcie przez nawigację.
+   - 1.01 (2026-02-08) Confirm przy wyjściu bez snackbar callback. Mały dialog: Zapisz, Odrzuć, Zostań.
+   - 1.02 (2026-02-08) UI: usunięty przycisk Back. Przeniesione: Enable edit na dół po lewej, Save/Close na dół po prawej.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Reflection
+@using System.Text.Json
+@using System.Threading
+@using System.Threading.Tasks
+@using Microsoft.Extensions.Localization
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject DevicesService DevicesService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@inject IStringLocalizer<DeviceEdit> L
+
+<MudPaper Class="pa-4 device-edit-root" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                @_errorMessage
+            </MudAlert>
+        }
+
+        @if (_loading)
+        {
+            <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Style="height:520px;">
+                <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                <MudText Typo="Typo.subtitle1" Class="mt-2">@L["LoadingData"]</MudText>
+            </MudStack>
+        }
+        else
+        {
+            <MudPaper Elevation="0" Class="device-summary">
+                <MudStack Spacing="1">
+
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="device-summary-top">
+                        <MudText Typo="Typo.h6" Class="device-summary-title">
+                            @GetSafe(_edit.Hostname, fallback: L["Fallback.DeviceTitle"])
+                        </MudText>
+
+                        @if (!string.IsNullOrWhiteSpace(GetSafe(_edit.Kind)))
+                        {
+                            <MudChip T="string" Variant="Variant.Filled" Color="Color.Primary" Class="ml-2">
+                                @GetSafe(_edit.Kind)
+                            </MudChip>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(GetSafe(_edit.Status)))
+                        {
+                            <MudChip T="string"
+                                     Variant="Variant.Outlined"
+                                     Color="@GetStatusChipColor(_edit.Status)"
+                                     Class="ml-2">
+                                @GetSafe(_edit.Status)
+                            </MudChip>
+                        }
+
+                        <MudSpacer />
+
+                        @if (_edit.WarrantyEnds.HasValue)
+                        {
+                            <MudStack Row="true"
+                                      AlignItems="AlignItems.Center"
+                                      Spacing="1"
+                                      Class="device-summary-warranty">
+                                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" />
+                                <MudText Typo="Typo.body2" Color="@GetWarrantyTextColor()">
+                                    @BuildWarrantyEndsInfo()
+                                </MudText>
+                            </MudStack>
+                        }
+                    </MudStack>
+
+                    <MudText Typo="Typo.body2" Class="device-summary-subtitle">
+                        @BuildDeviceSubtitle()
+                    </MudText>
+
+                    <MudGrid Spacing="1" AlignItems="AlignItems.Center" Class="device-summary-grid">
+
+                        <MudItem xs="12" sm="6" md="6" Class="device-summary-cell">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="device-summary-item">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">
+                                    <b>@L["Summary.User"]:</b> @GetSafe(_edit.User, L["Common.Dash"])
+                                </MudText>
+                            </MudStack>
+                        </MudItem>
+
+                        <MudItem xs="12" sm="6" md="6" Class="device-summary-cell">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="device-summary-item">
+                                <MudIcon Icon="@Icons.Material.Filled.Router" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">
+                                    <b>@L["Summary.IP"]:</b> <span class="device-mono">@GetSafe(_edit.IpAddress, L["Common.Dash"])</span>
+                                </MudText>
+
+                                <MudTooltip Text="@L["Tooltip.CopyIP"]">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                   Size="Size.Medium"
+                                                   Color="Color.Default"
+                                                   Variant="Variant.Text"
+                                                   Disabled="@string.IsNullOrWhiteSpace(GetSafe(_edit.IpAddress))"
+                                                   Class="ml-1"
+                                                   OnClick="@(() => CopyToClipboardAsync(_edit.IpAddress, L["Label.IP"]))" />
+                                </MudTooltip>
+                            </MudStack>
+                        </MudItem>
+
+                        <MudItem xs="12" sm="6" md="6" Class="device-summary-cell">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="device-summary-item">
+                                <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">
+                                    <b>@L["Summary.Location"]:</b> @GetSafe(_edit.Location, L["Common.Dash"])
+                                </MudText>
+                            </MudStack>
+                        </MudItem>
+
+                        <MudItem xs="12" sm="6" md="6" Class="device-summary-cell">
+                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="device-summary-item">
+                                <MudIcon Icon="@Icons.Material.Filled.ConfirmationNumber" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">
+                                    <b>@L["Summary.AssetNo"]:</b> <span class="device-mono">@GetSafe(_edit.AssetNo, L["Common.Dash"])</span>
+                                </MudText>
+
+                                <MudTooltip Text="@L["Tooltip.CopyAssetNo"]">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                   Size="Size.Medium"
+                                                   Color="Color.Default"
+                                                   Variant="Variant.Text"
+                                                   Disabled="@string.IsNullOrWhiteSpace(GetSafe(_edit.AssetNo))"
+                                                   Class="ml-1"
+                                                   OnClick="@(() => CopyToClipboardAsync(_edit.AssetNo, L["Label.AssetNo"]))" />
+                                </MudTooltip>
+                            </MudStack>
+                        </MudItem>
+
+                    </MudGrid>
+
+                </MudStack>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="device-tabs">
+                <MudTabs Rounded="true" Elevation="0" KeepPanelsAlive="true">
+
+                    <MudTabPanel Text="@L["Tab.General"]">
+                        <div class="device-tab-scroll">
+                            <MudGrid Spacing="2">
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Type"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Type"
+                                                         ValueChanged="v => SetEditString(x => _edit.Type = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_typeOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Type"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Type, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Kind"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Kind"
+                                                         ValueChanged="v => SetEditString(x => _edit.Kind = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_kindOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Kind"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Kind, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Status"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Status"
+                                                         ValueChanged="v => SetEditString(x => _edit.Status = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_statusOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Status"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Status, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Producer"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Producer"
+                                                         ValueChanged="v => SetEditString(x => _edit.Producer = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_producerOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Producer"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Producer, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Model"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Model"
+                                                         ValueChanged="v => SetEditString(x => _edit.Model = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_modelOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Model"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Model, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.SerialNumber"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.SerialNumber"
+                                                  ValueChanged="v => SetEditString(x => _edit.SerialNumber = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                            </MudGrid>
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.Network"]">
+                        <div class="device-tab-scroll">
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.Hostname"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.Hostname"
+                                                  ValueChanged="v => SetEditString(x => _edit.Hostname = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.IPAddress"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.IpAddress"
+                                                  ValueChanged="v => SetEditString(x => _edit.IpAddress = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.MacEthernet"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.MacEthernet"
+                                                  ValueChanged="v => SetEditString(x => _edit.MacEthernet = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.MacWlan"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.MacWlan"
+                                                  ValueChanged="v => SetEditString(x => _edit.MacWlan = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.IMEI1"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.Imei1"
+                                                  ValueChanged="v => SetEditString(x => _edit.Imei1 = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.IMEI2"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.Imei2"
+                                                  ValueChanged="v => SetEditString(x => _edit.Imei2 = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+                            </MudGrid>
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.UserLocation"]">
+                        <div class="device-tab-scroll">
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" md="6">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.User"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.User"
+                                                         ValueChanged="v => SetEditString(x => _edit.User = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_userOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.User"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.User, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="6">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudAutocomplete T="string"
+                                                         Label="@L["Field.Location"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Disabled="@_loading"
+                                                         Clearable="true"
+                                                         Value="@_edit.Location"
+                                                         ValueChanged="v => SetEditString(x => _edit.Location = x, v)"
+                                                         SearchFunc="@( (string s, CancellationToken ct) => SearchInOptionsAsync(_locationOptions, s, ct) )"
+                                                         DebounceInterval="150"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MaxItems="@((int?)null)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Location"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@GetSafe(_edit.Location, L["Common.Dash"])"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+                            </MudGrid>
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.Warranty"]">
+                        <div class="device-tab-scroll">
+                            <MudGrid Spacing="2">
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudDatePicker Label="@L["Field.WarrantyStart"]"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Disabled="@_loading"
+                                                       Date="_edit.WarrantyStarts"
+                                                       DateChanged="d => SetEditDate(x => _edit.WarrantyStarts = x, d)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.WarrantyStart"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@FormatDate(_edit.WarrantyStarts)"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    @if (_isEditEnabled)
+                                    {
+                                        <MudDatePicker Label="@L["Field.WarrantyEnd"]"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Disabled="@_loading"
+                                                       Date="_edit.WarrantyEnds"
+                                                       DateChanged="d => SetEditDate(x => _edit.WarrantyEnds = x, d)" />
+                                    }
+                                    else
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.WarrantyEnd"]"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      ReadOnly="true"
+                                                      Value="@FormatDate(_edit.WarrantyEnds)"
+                                                      Adornment="@LockAdornment"
+                                                      AdornmentIcon="@LockIcon"
+                                                      AdornmentColor="Color.Default" />
+                                    }
+                                </MudItem>
+
+                            </MudGrid>
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.Assets"]">
+                        <div class="device-tab-scroll">
+                            <MudGrid Spacing="2">
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.InventoryNo"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.InventoryNo"
+                                                  ValueChanged="v => SetEditString(x => _edit.InventoryNo = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="@L["Field.AssetNo"]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="@(!_isEditEnabled)"
+                                                  Disabled="@_loading"
+                                                  Value="@_edit.AssetNo"
+                                                  ValueChanged="v => SetEditString(x => _edit.AssetNo = x, v)"
+                                                  Adornment="@LockAdornment"
+                                                  AdornmentIcon="@LockIcon"
+                                                  AdornmentColor="Color.Default" />
+                                </MudItem>
+
+                            </MudGrid>
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.Note"]">
+                        <div class="device-tab-scroll">
+                            <MudTextField T="string"
+                                          Label="@L["Field.Note"]"
+                                          Lines="16"
+                                          AutoGrow="false"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          ReadOnly="@(!_isEditEnabled)"
+                                          Disabled="@_loading"
+                                          Value="@_edit.Note"
+                                          ValueChanged="v => SetEditString(x => _edit.Note = x, v)"
+                                          Adornment="@LockAdornment"
+                                          AdornmentIcon="@LockIcon"
+                                          AdornmentColor="Color.Default" />
+                        </div>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="@L["Tab.History"]">
+                        <div class="device-tab-scroll">
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                @L["History.NotImplemented"]
+                            </MudAlert>
+                        </div>
+                    </MudTabPanel>
+
+                </MudTabs>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="device-footer">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="device-footer-inner">
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="@(_isEditEnabled ? Color.Default : Color.Primary)"
+                               StartIcon="@(_isEditEnabled ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                               OnClick="ToggleEditMode"
+                               Disabled="@(_loading || !_canEnableEdit)">
+                        @(_isEditEnabled? L["Action.Lock"] : L["Action.EnableEdit"])
+                    </MudButton>
+
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SaveAsync"
+                                   Disabled="@(!_isEditEnabled || _loading || !_isDirty || !_canSave)">
+                            @L["Action.Save"]
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Close"
+                                   OnClick="RequestCancelAsync"
+                                   Disabled="@_loading">
+                            @L["Action.Close"]
+                        </MudButton>
+                    </MudStack>
+
+                </MudStack>
+            </MudPaper>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .device-edit-root {
+        padding-bottom: 78px;
+    }
+
+    .device-summary {
+        padding: 14px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        margin-bottom: 12px;
+        background: rgba(255,255,255,0.02);
+        box-sizing: border-box;
+    }
+
+    .device-summary-top {
+        min-width: 0;
+    }
+
+    .device-summary-warranty {
+        opacity: 0.95;
+        white-space: nowrap;
+        min-width: 0;
+    }
+
+    .device-summary-title {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .device-summary-subtitle {
+        opacity: 0.85;
+        margin-top: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .device-summary-grid {
+        margin-top: 6px;
+    }
+
+    .device-summary-cell {
+        display: flex;
+        min-width: 0;
+    }
+
+    .device-summary-item {
+        width: 100%;
+        min-height: 30px;
+        line-height: 1.2;
+        min-width: 0;
+    }
+
+    .device-tabs {
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        min-height: 520px;
+    }
+
+    .device-tab-scroll {
+        height: 100%;
+        overflow: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .device-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .device-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: var(--mud-palette-surface);
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        box-sizing: border-box;
+    }
+
+    .device-footer-inner {
+        min-width: 0;
+    }
+</style>
+
+@code
+{
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private bool _isNew;
+    private bool _isEditEnabled;
+
+    private bool _isDirty;
+    private string _originalEditJson = string.Empty;
+
+    private string _errorMessage = string.Empty;
+
+    private bool _canView;
+    private bool _canEdit;
+    private bool _canCreate;
+
+    private bool _canEnableEdit;
+    private bool _canSave;
+
+    private DeviceListRow? _device;
+    private DeviceUpdateModel _edit = new();
+
+    private List<string> _typeOptions = new();
+    private List<string> _kindOptions = new();
+    private List<string> _statusOptions = new();
+    private List<string> _producerOptions = new();
+    private List<string> _modelOptions = new();
+    private List<string> _userOptions = new();
+    private List<string> _locationOptions = new();
+
+    private Adornment LockAdornment => !_isEditEnabled ? Adornment.End : Adornment.None;
+    private string? LockIcon => !_isEditEnabled ? Icons.Material.Filled.Lock : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+
+        var ctx = CurrentUserContextService.CurrentUser;
+        var isAuth = ctx != null && ctx.IsAuthenticated && ctx.IsActive == true;
+        var hasAccess = CurrentUserContextService.HasAccess;
+
+        _canView = isAuth && hasAccess && CurrentUserContextService.Can("Assets.Devices.View");
+        _canEdit = _canView && CurrentUserContextService.Can("Assets.Devices.Edit");
+        _canCreate = _canView && CurrentUserContextService.Can("Assets.Devices.Create");
+
+        _isNew = Id <= 0;
+
+        _canEnableEdit = _isNew ? _canCreate : _canEdit;
+        _canSave = _canEnableEdit;
+
+        _loading = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            await LoadLookupsAsync();
+            await LoadAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string BuildPageTitle()
+    {
+        if (_isNew)
+            return L["Title.NewDevice"];
+
+        var host = GetSafe(_edit.Hostname);
+        return string.IsNullOrWhiteSpace(host) ? L["Title.Device"] : host;
+    }
+
+    private void ToggleEditMode()
+    {
+        if (_loading || !_canEnableEdit)
+            return;
+
+        _isEditEnabled = !_isEditEnabled;
+
+        if (!_isEditEnabled)
+            RevertChanges();
+    }
+
+    private string BuildDeviceSubtitle()
+    {
+        var producer = GetSafe(_edit.Producer);
+        var model = GetSafe(_edit.Model);
+        var sn = GetSafe(_edit.SerialNumber, L["Common.Dash"]);
+
+        var left = string.Join(" ", new[] { producer, model }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+        if (string.IsNullOrWhiteSpace(left))
+            left = L["Fallback.DeviceTitle"];
+
+        return string.Format(CultureInfo.CurrentCulture, L["Subtitle.Format"], left, sn);
+    }
+
+    private Color GetStatusChipColor(string? status)
+    {
+        var s = (status ?? string.Empty).Trim();
+        if (s.Equals("Active", StringComparison.OrdinalIgnoreCase))
+            return Color.Success;
+
+        return Color.Default;
+    }
+
+    private string BuildWarrantyEndsInfo()
+    {
+        if (!_edit.WarrantyEnds.HasValue)
+            return string.Empty;
+
+        var end = _edit.WarrantyEnds.Value.Date;
+        var today = DateTime.Today;
+        var days = (end - today).Days;
+
+        if (days >= 0)
+            return string.Format(CultureInfo.CurrentCulture, L["Warranty.Ends.Format"], end, days);
+
+        return string.Format(CultureInfo.CurrentCulture, L["Warranty.Ended.Format"], end, Math.Abs(days));
+    }
+
+    private Color GetWarrantyTextColor()
+    {
+        if (!_edit.WarrantyEnds.HasValue)
+            return Color.Default;
+
+        var end = _edit.WarrantyEnds.Value.Date;
+        var days = (end - DateTime.Today).Days;
+
+        if (days < 0)
+            return Color.Error;
+
+        if (days <= 30)
+            return Color.Warning;
+
+        return Color.Default;
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        try
+        {
+            var result = await DevicesService.GetDevicesFilterLookupsAsync();
+            if (!result.Ok)
+            {
+                ClearOptions();
+                _errorMessage = result.ErrorMessage ?? L["Error.Lookups.LoadFailed"];
+                return;
+            }
+
+            var lookups = result.Lookups ?? new DeviceFilterLookups();
+
+            _typeOptions = NormalizeLookupList(lookups.Types);
+            _kindOptions = NormalizeLookupList(lookups.Kinds);
+            _statusOptions = NormalizeLookupList(lookups.Statuses);
+            _producerOptions = NormalizeLookupList(lookups.Producers);
+            _modelOptions = NormalizeLookupList(lookups.Models);
+            _locationOptions = NormalizeLookupList(lookups.Locations);
+            _userOptions = NormalizeLookupList(lookups.Users);
+        }
+        catch
+        {
+            ClearOptions();
+            _errorMessage = L["Error.Lookups.LoadFailed"];
+        }
+    }
+
+    private void ClearOptions()
+    {
+        _typeOptions = new();
+        _kindOptions = new();
+        _statusOptions = new();
+        _producerOptions = new();
+        _modelOptions = new();
+        _userOptions = new();
+        _locationOptions = new();
+    }
+
+    private static List<string> NormalizeLookupList<T>(IEnumerable<T>? items)
+    {
+        return (items ?? Enumerable.Empty<T>())
+            .Select(ExtractLookupText)
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string ExtractLookupText<T>(T item)
+    {
+        if (item == null)
+            return string.Empty;
+
+        if (item is string s)
+            return s;
+
+        var obj = (object)item;
+        var type = obj.GetType();
+
+        var candidates = new[]
+        {
+            "Name",
+            "Text",
+            "DisplayName",
+            "DisplayText",
+            "Value",
+            "Label",
+            "Title"
+        };
+
+        foreach (var propName in candidates)
+        {
+            var p = type.GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p == null)
+                continue;
+
+            var v = p.GetValue(obj);
+            if (v == null)
+                continue;
+
+            var txt = Convert.ToString(v) ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(txt))
+                return txt;
+        }
+
+        return obj.ToString() ?? string.Empty;
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorMessage = string.Empty;
+
+        try
+        {
+            if (_isNew)
+            {
+                _device = new DeviceListRow { Id = 0 };
+                _edit = new DeviceUpdateModel { Id = 0 };
+
+                SnapshotOriginal();
+                _isEditEnabled = _canCreate;
+
+                if (!_canCreate)
+                    _errorMessage = L["Error.NoCreatePermission"];
+
+                return;
+            }
+
+            var result = await DevicesService.GetDeviceByIdAsync(Id);
+            if (!result.Ok)
+            {
+                _errorMessage = result.ErrorMessage ?? L["Error.Device.LoadFailed"];
+                _device = null;
+                SnapshotOriginal();
+                _isEditEnabled = false;
+                return;
+            }
+
+            _device = result.Row;
+            if (_device == null)
+            {
+                _errorMessage = string.Format(CultureInfo.CurrentCulture, L["Error.Device.NotFoundById"], Id);
+                SnapshotOriginal();
+                _isEditEnabled = false;
+                return;
+            }
+
+            _edit = MapRowToUpdateModel(_device);
+            SnapshotOriginal();
+
+            _isEditEnabled = false;
+        }
+        catch
+        {
+            _errorMessage = L["Error.Device.LoadTryLater"];
+            _device = null;
+            SnapshotOriginal();
+            _isEditEnabled = false;
+        }
+    }
+
+    private void SnapshotOriginal()
+    {
+        _originalEditJson = SerializeEdit(_edit);
+        _isDirty = false;
+    }
+
+    private void MarkDirty()
+    {
+        if (string.IsNullOrWhiteSpace(_originalEditJson))
+        {
+            _isDirty = true;
+            return;
+        }
+
+        var current = SerializeEdit(_edit);
+        _isDirty = !string.Equals(_originalEditJson, current, StringComparison.Ordinal);
+    }
+
+    private static string SerializeEdit(DeviceUpdateModel model)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = null
+        };
+
+        return JsonSerializer.Serialize(model ?? new DeviceUpdateModel(), options);
+    }
+
+    private void SetEditString(Action<string> setter, string? value)
+    {
+        var v = value ?? string.Empty;
+        setter(v);
+        MarkDirty();
+    }
+
+    private void SetEditDate(Action<DateTime?> setter, DateTime? value)
+    {
+        setter(value);
+        MarkDirty();
+    }
+
+    private void RevertChanges()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_originalEditJson))
+                return;
+
+            var restored = JsonSerializer.Deserialize<DeviceUpdateModel>(_originalEditJson);
+            if (restored == null)
+                return;
+
+            _edit = restored;
+            _isDirty = false;
+        }
+        catch
+        {
+            Snackbar.Add(L["Snackbar.RevertFailed"], Severity.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_isEditEnabled || _loading || !_isDirty || !_canSave)
+            return;
+
+        _loading = true;
+        try
+        {
+            if (_isNew || _edit.Id <= 0)
+            {
+                var create = await DevicesService.CreateDeviceAsync(_edit);
+                if (!create.Ok)
+                {
+                    Snackbar.Add(create.ErrorMessage ?? L["Snackbar.SaveFailed"], Severity.Error);
+                    return;
+                }
+
+                Snackbar.Add(L["Snackbar.Saved"], Severity.Success);
+                NavigateBackToList();
+                return;
+            }
+
+            var save = await DevicesService.UpdateDeviceAsync(_edit);
+            if (!save.Ok)
+            {
+                Snackbar.Add(save.ErrorMessage ?? L["Snackbar.SaveFailed"], Severity.Error);
+                return;
+            }
+
+            Snackbar.Add(L["Snackbar.Saved"], Severity.Success);
+            NavigateBackToList();
+        }
+        catch
+        {
+            Snackbar.Add(L["Snackbar.SaveError"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RequestCancelAsync()
+    {
+        if (_loading)
+            return;
+
+        if (_isEditEnabled && _isDirty)
+        {
+            var action = await DialogService.ShowMessageBox(
+                title: L["Confirm.Unsaved.Title"],
+                message: L["Confirm.Unsaved.Message"],
+                yesText: L["Confirm.Unsaved.Save"],
+                noText: L["Confirm.Unsaved.Discard"],
+                cancelText: L["Confirm.Unsaved.Stay"]
+            );
+
+            if (action == true)
+            {
+                await SaveAsync();
+                return;
+            }
+
+            if (action == false)
+            {
+                NavigateBackToList();
+                return;
+            }
+
+            return;
+        }
+
+        NavigateBackToList();
+    }
+
+    private void NavigateBackToList()
+    {
+        NavigationManager.NavigateTo("/assets/devices");
+    }
+
+    private async Task CopyToClipboardAsync(string? value, string label)
+    {
+        var v = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(v))
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", v);
+            Snackbar.Add(string.Format(CultureInfo.CurrentCulture, L["Snackbar.CopiedFormat"], label), Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add(L["Snackbar.CopyFailed"], Severity.Error);
+        }
+    }
+
+    private static string FormatDate(DateTime? dt)
+        => dt.HasValue ? dt.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "-";
+
+    private static string GetSafe(string? value, string fallback = "")
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? fallback : v;
+    }
+
+    private static DeviceUpdateModel MapRowToUpdateModel(DeviceListRow row)
+    {
+        return new DeviceUpdateModel
+        {
+            Id = row.Id,
+
+            Type = row.Type ?? string.Empty,
+            Kind = row.Kind ?? string.Empty,
+            Status = row.Status ?? string.Empty,
+            Producer = row.Producer ?? string.Empty,
+            Model = row.Model ?? string.Empty,
+            SerialNumber = row.SerialNumber ?? string.Empty,
+
+            User = row.User ?? string.Empty,
+            Location = row.Location ?? string.Empty,
+
+            Hostname = row.Hostname ?? string.Empty,
+            IpAddress = row.IpAddress ?? string.Empty,
+            MacEthernet = row.MacEthernet ?? string.Empty,
+            MacWlan = row.MacWlan ?? string.Empty,
+            Imei1 = row.Imei1 ?? string.Empty,
+            Imei2 = row.Imei2 ?? string.Empty,
+
+            WarrantyStarts = row.WarrantyStarts,
+            WarrantyEnds = row.WarrantyEnds,
+
+            InventoryNo = row.InventoryNo ?? string.Empty,
+            AssetNo = row.AssetNo ?? string.Empty,
+
+            Note = row.Note ?? string.Empty
+        };
+    }
+
+    private static Task<IEnumerable<string>> SearchInOptionsAsync(List<string> options, string? search, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var list = options ?? new List<string>();
+        var s = (search ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(s))
+            return Task.FromResult<IEnumerable<string>>(list);
+
+        var filtered = list
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x.Contains(s, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<string>>(filtered);
+    }
+}

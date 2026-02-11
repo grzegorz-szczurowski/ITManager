@@ -1,0 +1,588 @@
+@page "/"
+@page "/contacts"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Contacts.View")]
+
+@* File: Components/Pages/Contacts.razor
+   Description: Lista kontaktów pracowników w oparciu o MudDataGrid. Search zawsze widoczny,
+                a filtry dodatkowe w zwijanym panelu, spójnie z Tickets.
+   Created: 2025-12-05
+   Updated: 2025-12-17 - wersja 1.10 - ujednolicenie wyglądu datagrida i filtrów do układu z Tickets.
+   Updated: 2025-12-26 - wersja 1.22:
+     - Drukuj przeniesiony do osobnej linii (jak Add w Devices)
+     - Odśwież jako ikona przy tytule
+     - Wyczyść jako Outlined "Wyczyść filtry"
+     - Toolbar: prawa strona search + clear + advanced filters
+   Updated: 2025-12-27 - wersja 1.23:
+     - Dodany overlay loader jak w Devices (MudOverlay + spinner + tekst)
+   Updated: 2026-01-05 - wersja 1.25:
+     - Search filtrowany lokalnie (bez przeładowywania z bazy na każdą literę)
+     - Brak utraty fokusu w polu wyszukiwania
+   Updated: 2026-01-05 - wersja 1.26:
+     - Filtr zaawansowany "Dział" nad przyciskiem DRUKUJ
+   Updated: 2026-01-06 - wersja 1.27:
+     - Lokalizacja UI: przeniesienie tekstów do resx (IStringLocalizer)
+   Updated: 2026-01-09 - wersja 1.28:
+     - RBAC: Contacts.View (wejście), Contacts.Print (druk)
+   Updated: 2026-01-12 - wersja 1.29:
+     - RowClick: ContactInfo otwiera się dla wszystkich z Contacts.View (okno informacyjne).
+   Updated: 2026-01-23 - wersja 1.30:
+     - Grid: standard kolumn jak UsersIndex/DevicesIndex: procenty + table-layout fixed + ellipsis, bez horizontal scroll.
+     - Overlay: ograniczony do kontenera listy (nie zasłania całej strony).
+   Updated: 2026-01-23 - wersja 1.31:
+     - Kolumny: Imię + Nazwisko scalone do jednej kolumny DisplayName.
+   Updated: 2026-01-25 - wersja 1.32:
+     - Security: page-level policy Authorize (Perm:Contacts.View)
+     - Logging: ILogger zamiast Console.Error
+     - RBAC: Print wymaga Contacts.Print
+     - Overlay CSS: absolute + inset jak inne ekrany
+   Updated: 2026-02-03 - wersja 1.33:
+     - DisplayName format: "Nazwisko, Imię" zamiast "Imię Nazwisko"
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using ITManager.Models
+@using MudBlazor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using ITManager.Services.Auth
+
+@inject ContactsService ContactsService
+@inject NavigationManager NavigationManager
+@inject IDialogService DialogService
+@inject IStringLocalizer<ContactsIndex> L
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject ILogger<ContactsIndex> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadContactsAsync"
+                               Disabled="@(_loading || !_canViewContacts)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="contacts-toolbar-right">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="@(async (string v) => await OnSearchChangedAsync(v))"
+                              ValueChangedDebounceInterval="400"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_loading || !_canViewContacts)"
+                              Class="contacts-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 contacts-clear-btn"
+                           OnClick="ClearFiltersAsync"
+                           Disabled="@(_loading || !_canViewContacts)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_loading || !_canViewContacts)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+
+        </MudStack>
+
+        @if (!_canViewContacts)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="contacts-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_errorMessage
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 contacts-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["DepartmentLabel"]"
+                                           Value="@_selectedDepartment"
+                                           ValueChanged="OnDepartmentChanged"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_loading">
+                                    <MudSelectItem Value="@AllDepartmentsValue">@L["AllDepartments"]</MudSelectItem>
+                                    @foreach (var dept in _departments)
+                                    {
+                                        <MudSelectItem Value="@dept">@dept</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Print"
+                               OnClick="PrintContacts"
+                               Disabled="@(_loading || !_canPrintContacts)">
+                        @L["Print"]
+                    </MudButton>
+
+                </MudStack>
+
+                <MudDataGrid T="Contact"
+                             Class="contacts-grid"
+                             Items="@_filteredContacts"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Loading="false"
+                             RowClick="@(_canViewContacts ? OnRowClick : null)"
+                             RowClassFunc="GetRowClass"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false">
+
+                    <Columns>
+
+                        @* DisplayName: Nazwisko, Imię *@
+                        <TemplateColumn Title="@L["ColDisplayName"]"
+                                        Sortable="true"
+                                        SortBy="@(x => BuildDisplayName(x))"
+                                        HeaderStyle="width:13%;"
+                                        CellStyle="width:13%;">
+                            <CellTemplate Context="ctx">
+                                @BuildDisplayName(ctx.Item)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="@(x => x.Dzial)"
+                                        Title="@L["ColDepartment"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:17%;"
+                                        CellStyle="width:17%;" />
+
+                        <PropertyColumn Property="@(x => x.Stanowisko)"
+                                        Title="@L["ColPosition"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:24%;"
+                                        CellStyle="width:24%;" />
+
+                        <PropertyColumn Property="@(x => x.Wewnetrzny)"
+                                        Title="@L["ColInternal"]"
+                                        Sortable="true"
+                                        CellClass="centered"
+                                        HeaderClass="centered"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="@(x => x.Stacjonarny)"
+                                        Title="@L["ColLandline"]"
+                                        Sortable="true"
+                                        CellClass="centered"
+                                        HeaderClass="centered"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;" />
+
+                        <PropertyColumn Property="@(x => x.Komorkowy)"
+                                        Title="@L["ColMobile"]"
+                                        Sortable="true"
+                                        CellClass="centered"
+                                        HeaderClass="centered"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;" />
+
+                        <TemplateColumn Title="@L["ColEmail"]"
+                                        Sortable="true"
+                                        SortBy="@(x => x.Email)"
+                                        HeaderStyle="width:18%;"
+                                        CellStyle="width:18%;">
+                            <CellTemplate Context="ctx">
+                                @if (!string.IsNullOrWhiteSpace(ctx.Item.Email))
+                                {
+                                    <a href="mailto:@ctx.Item.Email"
+                                       style="color: var(--mud-palette-primary); text-decoration:none;">
+                                        @ctx.Item.Email
+                                    </a>
+                                }
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@_loading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="contacts-overlay">
+                    <MudPaper Class="pa-6 contacts-overlay-card">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @L["Loading"]
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .contacts-row {
+        min-height: 44px;
+    }
+
+        .contacts-row td,
+        .contacts-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+    .contacts-row-clickable:hover {
+        background-color: rgba(2, 136, 209, 0.12);
+        cursor: pointer;
+    }
+
+    .contacts-search {
+        min-width: 400px;
+    }
+
+    .contacts-filters-panel {
+        border-radius: 8px;
+    }
+
+    .contacts-clear-btn {
+        border-width: 1px;
+    }
+
+    .centered {
+        text-align: center;
+    }
+
+    .contacts-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .contacts-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .contacts-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .contacts-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .contacts-grid th,
+    .contacts-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllDepartmentsValue = "__ALL_DEPARTMENTS__";
+
+    private const string PermView = "Contacts.View";
+    private const string PermPrint = "Contacts.Print";
+
+    private List<Contact> _contacts = new();
+    private List<Contact> _filteredContacts = new();
+
+    private string _searchText = string.Empty;
+
+    private bool _loading;
+    private string? _errorMessage;
+
+    private bool _showAdvancedFilters;
+
+    private List<string> _departments = new();
+    private string? _selectedDepartment;
+
+    private bool _canViewContacts;
+    private bool _canPrintContacts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        _canViewContacts = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has(PermView);
+
+        if (!_canViewContacts)
+        {
+            _loading = false;
+            return;
+        }
+
+        _canPrintContacts = ctx.Has(PermPrint);
+
+        await LoadContactsAsync();
+    }
+
+    private async Task ReloadContactsAsync()
+        => await LoadContactsAsync();
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        ApplyClientFilters();
+        return Task.CompletedTask;
+    }
+
+    private Task OnDepartmentChanged(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value == AllDepartmentsValue)
+            _selectedDepartment = null;
+        else
+            _selectedDepartment = value;
+
+        ApplyClientFilters();
+        return Task.CompletedTask;
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _searchText = string.Empty;
+        _selectedDepartment = null;
+        _showAdvancedFilters = false;
+
+        ApplyClientFilters();
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadContactsAsync()
+    {
+        if (!_canViewContacts)
+            return;
+
+        _loading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var contactsFromDb = await ContactsService.GetContactsAsync(null);
+
+            _contacts = contactsFromDb ?? new List<Contact>();
+
+            _departments = _contacts
+                .Select(c => (c.Dzial ?? string.Empty).Trim())
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(d => d)
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(_selectedDepartment)
+                && !_departments.Contains(_selectedDepartment, StringComparer.OrdinalIgnoreCase))
+            {
+                _selectedDepartment = null;
+            }
+
+            ApplyClientFilters();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Logger.LogWarning(ex, "[Contacts] Unauthorized.");
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+
+            _contacts = new();
+            _filteredContacts = new();
+            _errorMessage = L["NoViewPermission"];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Contacts] Load error.");
+            _errorMessage = L["LoadError"];
+
+            _contacts = new();
+            _filteredContacts = new();
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void ApplyClientFilters()
+    {
+        IEnumerable<Contact> query = _contacts;
+
+        if (!string.IsNullOrWhiteSpace(_selectedDepartment))
+        {
+            var dep = _selectedDepartment.Trim();
+            query = query.Where(c =>
+                string.Equals((c.Dzial ?? string.Empty).Trim(), dep, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var s = _searchText.Trim();
+
+            static bool Contains(string? src, string term)
+                => !string.IsNullOrWhiteSpace(src)
+                   && src.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+            query = query.Where(c =>
+                Contains(BuildDisplayName(c), s) ||
+                Contains(c.Nazwisko, s) ||
+                Contains(c.Imie, s) ||
+                Contains(c.Dzial, s) ||
+                Contains(c.Stanowisko, s) ||
+                Contains(c.Wewnetrzny, s) ||
+                Contains(c.Stacjonarny, s) ||
+                Contains(c.Komorkowy, s) ||
+                Contains(c.Email, s));
+        }
+
+        _filteredContacts = query.ToList();
+    }
+
+    private string GetRowClass(Contact contact, int rowNumber)
+    {
+        _ = contact;
+        _ = rowNumber;
+
+        return _canViewContacts ? "contacts-row contacts-row-clickable" : "contacts-row";
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<Contact> args)
+    {
+        if (!_canViewContacts)
+            return;
+
+        var email = args?.Item?.Email;
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            Snackbar.Add(L["Msg_NoEmail"], Severity.Info);
+            return;
+        }
+
+        OpenContactInfoDialog(email);
+    }
+
+    private void OpenContactInfoDialog(string email)
+    {
+        var parameters = new DialogParameters
+        {
+            { "Email", email }
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+            FullWidth = true,
+            MaxWidth = MaxWidth.Medium
+        };
+
+        DialogService.Show<ContactInfoDialog>(string.Empty, parameters, options);
+    }
+
+    private void PrintContacts()
+    {
+        if (!_canPrintContacts)
+        {
+            Snackbar.Add(L["NoPrintPermission"], Severity.Warning);
+            return;
+        }
+
+        var queryParts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            queryParts.Add($"search={Uri.EscapeDataString(_searchText)}");
+
+        if (!string.IsNullOrWhiteSpace(_selectedDepartment))
+            queryParts.Add($"department={Uri.EscapeDataString(_selectedDepartment)}");
+
+        var queryString = queryParts.Count > 0 ? "?" + string.Join("&", queryParts) : string.Empty;
+
+        NavigationManager.NavigateTo($"/api/contacts/print{queryString}", forceLoad: true);
+    }
+
+    private static string BuildDisplayName(Contact? c)
+    {
+        if (c == null)
+            return string.Empty;
+
+        var first = (c.Imie ?? string.Empty).Trim();
+        var last = (c.Nazwisko ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(first) && string.IsNullOrWhiteSpace(last))
+            return string.Empty;
+
+        if (string.IsNullOrWhiteSpace(last))
+            return first;
+
+        if (string.IsNullOrWhiteSpace(first))
+            return last;
+
+        return last + ", " + first;
+    }
+}

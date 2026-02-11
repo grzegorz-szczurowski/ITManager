@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve"><value>Raporty</value></data>
+	<data name="Subtitle" xml:space="preserve"><value>Portal raportów i analiz</value></data>
+	<data name="ReportsList" xml:space="preserve"><value>Lista raportów</value></data>
+
+	<data name="NoAccess" xml:space="preserve"><value>Brak dostępu. Wymagane uprawnienie:</value></data>
+
+	<data name="ColCategory" xml:space="preserve"><value>Kategoria</value></data>
+	<data name="ColName" xml:space="preserve"><value>Nazwa</value></data>
+	<data name="ColDescription" xml:space="preserve"><value>Opis</value></data>
+
+	<data name="NoReports" xml:space="preserve"><value>Brak raportów do wyświetlenia.</value></data>
+
+	<data name="Rep_Prints_Category" xml:space="preserve"><value>Drukarki</value></data>
+	<data name="Rep_Prints_Name" xml:space="preserve"><value>Raport wydruków</value></data>
+	<data name="Rep_Prints_Desc" xml:space="preserve"><value>Wydruki i koszty drukarek, filtr dat i lokalizacji</value></data>
+</root>

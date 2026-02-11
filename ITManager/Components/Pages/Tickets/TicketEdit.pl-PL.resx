@@ -1,0 +1,258 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<!-- ===== Guards / permissions / generic errors ===== -->
+	<data name="NoPermissionView" xml:space="preserve">
+    <value>Brak uprawnień do podglądu zgłoszeń.</value>
+  </data>
+	<data name="NoPermissionCreate" xml:space="preserve">
+    <value>Brak uprawnień do utworzenia zgłoszenia.</value>
+  </data>
+	<data name="NoPermissionEdit" xml:space="preserve">
+    <value>Brak uprawnień do edycji zgłoszenia.</value>
+  </data>
+	<data name="NoPermissionAssign" xml:space="preserve">
+    <value>Brak uprawnień do przypisania zgłoszenia.</value>
+  </data>
+	<data name="NoPermissionEditActions" xml:space="preserve">
+    <value>Brak uprawnień do dodawania lub edycji czynności.</value>
+  </data>
+	<data name="TicketNotFound" xml:space="preserve">
+    <value>Nie znaleziono zgłoszenia.</value>
+  </data>
+	<data name="LoadErrorGeneric" xml:space="preserve">
+    <value>Nie udało się wczytać danych zgłoszenia. Spróbuj ponownie.</value>
+  </data>
+
+	<!-- ===== Header ===== -->
+	<data name="NewTicketHeaderTitle" xml:space="preserve">
+    <value>Nowe zgłoszenie</value>
+  </data>
+	<data name="CreateModeSubtitle" xml:space="preserve">
+    <value>Utwórz zgłoszenie, wybierz pilność i wpływ, a system wyliczy priorytet.</value>
+  </data>
+
+	<!-- ===== Assign hint / queue info ===== -->
+	<data name="AssignHintText" xml:space="preserve">
+    <value>Zgłoszenie jest w kolejce i nie ma jeszcze operatora. Możesz przypisać je do siebie, aby rozpocząć obsługę.</value>
+  </data>
+	<data name="AssignToMeButton" xml:space="preserve">
+    <value>Przypisz do mnie</value>
+  </data>
+	<data name="AssignedToMeSuccess" xml:space="preserve">
+    <value>Zgłoszenie zostało przypisane do Ciebie.</value>
+  </data>
+	<data name="AssignError" xml:space="preserve">
+    <value>Nie udało się przypisać zgłoszenia. Szczegóły: {0}</value>
+  </data>
+	<data name="QueueInfoTitle" xml:space="preserve">
+    <value>Zgłoszenie jest w kolejce</value>
+  </data>
+	<data name="QueueInfoText" xml:space="preserve">
+    <value>To zgłoszenie nie ma jeszcze przypisanego operatora. Zostanie podjęte, gdy ktoś z IT je przypisze.</value>
+  </data>
+
+	<!-- ===== Left panel labels ===== -->
+	<data name="CategoryTitle" xml:space="preserve">
+    <value>Kategoria</value>
+  </data>
+	<data name="UrgencyTitle" xml:space="preserve">
+    <value>Pilność</value>
+  </data>
+	<data name="ImpactTitle" xml:space="preserve">
+    <value>Wpływ</value>
+  </data>
+	<data name="PriorityTitle" xml:space="preserve">
+    <value>Priorytet</value>
+  </data>
+
+	<!-- ===== Category values ===== -->
+	<data name="Category.UserSupport" xml:space="preserve">
+    <value>Wsparcie użytkownika</value>
+  </data>
+	<data name="Category.ITInternal" xml:space="preserve">
+    <value>IT wewnętrzne</value>
+  </data>
+	<data name="Category.Project" xml:space="preserve">
+    <value>Projekt</value>
+  </data>
+
+	<!-- ===== Levels (toggle labels) ===== -->
+	<data name="Level_Critical" xml:space="preserve">
+    <value>Krytyczny</value>
+  </data>
+	<data name="Level_High" xml:space="preserve">
+    <value>Wysoki</value>
+  </data>
+	<data name="Level_Medium" xml:space="preserve">
+    <value>Średni</value>
+  </data>
+	<data name="Level_Low" xml:space="preserve">
+    <value>Niski</value>
+  </data>
+	<data name="Level_Info" xml:space="preserve">
+    <value>Info</value>
+  </data>
+
+	<!-- ===== Hints when not selected ===== -->
+	<data name="SelectUrgencyHint" xml:space="preserve">
+    <value>Wybierz poziom pilności.</value>
+  </data>
+	<data name="SelectImpactHint" xml:space="preserve">
+    <value>Wybierz poziom wpływu.</value>
+  </data>
+
+	<!-- ===== Urgency descriptions ===== -->
+	<data name="UrgencyDescCritical" xml:space="preserve">
+    <value>Wymaga natychmiastowej reakcji.</value>
+  </data>
+	<data name="UrgencyDescHigh" xml:space="preserve">
+    <value>Pilne. Utrudnia pracę i powinno być podjęte szybko.</value>
+  </data>
+	<data name="UrgencyDescMedium" xml:space="preserve">
+    <value>Standardowa pilność. Można obsłużyć w normalnym trybie.</value>
+  </data>
+	<data name="UrgencyDescLow" xml:space="preserve">
+    <value>Niska pilność. Może poczekać.</value>
+  </data>
+
+	<!-- ===== Impact descriptions ===== -->
+	<data name="ImpactDescCritical" xml:space="preserve">
+    <value>Krytyczny wpływ na proces lub większą grupę użytkowników.</value>
+  </data>
+	<data name="ImpactDescHigh" xml:space="preserve">
+    <value>Duży wpływ na dział lub ważny obszar pracy.</value>
+  </data>
+	<data name="ImpactDescMedium" xml:space="preserve">
+    <value>Średni wpływ na pracę. Obejmuje pojedynczy obszar lub część procesu.</value>
+  </data>
+	<data name="ImpactDescLow" xml:space="preserve">
+    <value>Niewielki wpływ. Dotyczy pojedynczej osoby lub mało istotnej funkcji.</value>
+  </data>
+	<data name="ImpactDescInfo" xml:space="preserve">
+    <value>Informacyjne. Brak realnego wpływu, np. pytanie lub drobna prośba.</value>
+  </data>
+
+	<!-- ===== RBAC restriction hint for urgency/impact edits ===== -->
+	<data name="UrgencyImpactEditRestrictedHint" xml:space="preserve">
+    <value>Zmiana pilności i wpływu jest ograniczona do operatorów z uprawnieniami Assigned lub All.</value>
+  </data>
+
+	<!-- ===== Right panel labels ===== -->
+	<data name="RequesterTitle" xml:space="preserve">
+    <value>Zgłaszający</value>
+  </data>
+	<data name="OperatorTitle" xml:space="preserve">
+    <value>Operator</value>
+  </data>
+	<data name="TitleLabel" xml:space="preserve">
+    <value>Tytuł</value>
+  </data>
+
+	<!-- ===== Field validation ===== -->
+	<data name="TitleTooShort" xml:space="preserve">
+    <value>Tytuł musi mieć od 10 do 160 znaków.</value>
+  </data>
+	<data name="FormInvalidWarning" xml:space="preserve">
+    <value>Uzupełnij wymagane pola poprawnie.</value>
+  </data>
+
+	<!-- ===== Actions section ===== -->
+	<data name="ActionsTitle" xml:space="preserve">
+    <value>Czynności</value>
+  </data>
+	<data name="AddButton" xml:space="preserve">
+    <value>Dodaj</value>
+  </data>
+	<data name="AddActionDialogTitle" xml:space="preserve">
+    <value>Dodaj czynność</value>
+  </data>
+	<data name="EditActionDialogTitle" xml:space="preserve">
+    <value>Edytuj czynność</value>
+  </data>
+	<data name="NoActions" xml:space="preserve">
+    <value>Brak czynności dla tego zgłoszenia.</value>
+  </data>
+
+	<!-- ===== Grid columns ===== -->
+	<data name="GridColDate" xml:space="preserve">
+    <value>Data</value>
+  </data>
+	<data name="GridColAddedBy" xml:space="preserve">
+    <value>Dodał</value>
+  </data>
+	<data name="GridColPublic" xml:space="preserve">
+    <value>Publiczne</value>
+  </data>
+	<data name="GridColDescription" xml:space="preserve">
+    <value>Opis</value>
+  </data>
+	<data name="GridColStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<!-- ===== Public tooltips ===== -->
+	<data name="PublicTooltipAll" xml:space="preserve">
+    <value>Widoczne dla wszystkich, którzy mają dostęp do zgłoszenia.</value>
+  </data>
+	<data name="PublicTooltipRestricted" xml:space="preserve">
+    <value>Widoczne tylko dla operatorów i administratorów.</value>
+  </data>
+
+	<!-- ===== Footer buttons ===== -->
+	<data name="CancelButton" xml:space="preserve">
+    <value>Anuluj</value>
+  </data>
+	<data name="SaveButton" xml:space="preserve">
+    <value>Zapisz</value>
+  </data>
+	<data name="CreateButton" xml:space="preserve">
+    <value>Utwórz</value>
+  </data>
+
+	<!-- ===== Save / create results ===== -->
+	<data name="SavedSuccess" xml:space="preserve">
+    <value>Zapisano zmiany.</value>
+  </data>
+	<data name="SaveError" xml:space="preserve">
+    <value>Nie udało się zapisać. Szczegóły: {0}</value>
+  </data>
+	<data name="TicketCreatedSuccess" xml:space="preserve">
+    <value>Utworzono zgłoszenie #{0}.</value>
+  </data>
+
+	<!-- ===== Overlay ===== -->
+	<data name="Working" xml:space="preserve">
+    <value>Przetwarzanie…</value>
+  </data>
+
+	<!-- ===== Priority labels used in chips ===== -->
+	<data name="Priority.Critical" xml:space="preserve">
+    <value>Krytyczny</value>
+  </data>
+	<data name="Priority.VeryHigh" xml:space="preserve">
+    <value>Bardzo wysoki</value>
+  </data>
+	<data name="Priority.High" xml:space="preserve">
+    <value>Wysoki</value>
+  </data>
+	<data name="Priority.Medium" xml:space="preserve">
+    <value>Średni</value>
+  </data>
+	<data name="Priority.Low" xml:space="preserve">
+    <value>Niski</value>
+  </data>
+
+</root>

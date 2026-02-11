@@ -1,0 +1,419 @@
+﻿@namespace ITManager.Components.Pages.Contacts
+
+@* File: Components/Dialogs/ContactInfoDialog.razor
+   Description: Dialog (modal) do podglądu danych kontaktowych (read only).
+                Zawiera QR wizytówkę (vCard) do zeskanowania, z logo firmy.
+                Edycja danych oraz zgłoszenia aktualizacji przeniesione do innej lokalizacji.
+   Version: 1.34
+   Created: 2025-12-28
+   Change log:
+   - 1.24 Fix: QRCoder GetGraphic wymaga darkColor/lightColor
+   - 1.25 Fix: konflikt nazw System.Drawing.Color/Size z MudBlazor.Color/Size (pełne nazwy)
+   - 1.26 UI: info-box nad formularzem i QR; węższe pola formularza; szerszy QR
+   - 1.30 (2026-01-12) Refactor: dialog tylko do podglądu; usunięto tryb edycji, info-box i przyciski wysyłki.
+   - 1.31 (2026-01-12) UX: lepsza czytelność (ReadOnly zamiast Disabled), spójne pola.
+   - 1.32 (2026-01-12) UX: usunięto akcje mail/tel, usunięto dopisek informacyjny.
+   - 1.33 (2026-01-12) UX: nazwa firmy przeniesiona na koniec formularza, nagłówek bez imienia/nazwiska, ukryto X zamykania.
+   - 1.34 (2026-01-18) i18n: tłumaczenia etykiet i komunikatów. *@
+
+@using System
+@using System.IO
+@using System.Linq
+@using System.Text
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Models
+@using QRCoder
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Localization
+
+@inject ContactsService ContactsService
+@inject ISnackbar Snackbar
+@inject IWebHostEnvironment WebHostEnvironment
+@inject IStringLocalizer<ContactInfoDialog> L
+
+<MudDialog Class="contact-info-dialog" Style="max-width: 1100px;">
+
+    <DialogContent>
+
+        <MudStack Spacing="3" Class="mt-1">
+
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                    @_errorMessage
+                </MudAlert>
+            }
+
+            @if (_isLoading)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Class="mt-2">
+                    <MudProgressCircular Size="Size.Large" Indeterminate="true" />
+                    <MudText Class="ms-4">
+                        @L["Ui.LoadingContact"]
+                    </MudText>
+                </MudStack>
+            }
+            else if (_currentContact is not null)
+            {
+                <MudGrid Spacing="2">
+
+                    @* LEWA: dane *@
+                    <MudItem xs="12" md="7">
+                        <div class="contact-form-narrow">
+
+                            <MudPaper Class="pa-4 contact-panel" Elevation="0">
+
+                                <MudText Typo="Typo.subtitle1" Class="mb-2">
+                                    @L["Ui.ContactDetailsHeader"]
+                                </MudText>
+
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.FirstName"]"
+                                                      Value="@NullToEmpty(_currentContact.Imie)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.LastName"]"
+                                                      Value="@NullToEmpty(_currentContact.Nazwisko)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Department"]"
+                                                      Value="@NullToEmpty(_currentContact.Dzial)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.JobTitle"]"
+                                                      Value="@NullToEmpty(_currentContact.Stanowisko)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.PhoneInternal"]"
+                                                      Value="@NullToEmpty(_currentContact.Wewnetrzny)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.PhoneLandline"]"
+                                                      Value="@NullToEmpty(_currentContact.Stacjonarny)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.PhoneMobile"]"
+                                                      Value="@NullToEmpty(_currentContact.Komorkowy)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    <MudItem xs="12">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Email"]"
+                                                      Value="@NullToEmpty(_currentContact.Email)"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                    @* Firma na końcu (zgodnie z makietą) *@
+                                    <MudItem xs="12">
+                                        <MudTextField T="string"
+                                                      Label="@L["Field.Company"]"
+                                                      Value="@CompanyName"
+                                                      ReadOnly="true"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      FullWidth />
+                                    </MudItem>
+
+                                </MudGrid>
+
+                            </MudPaper>
+
+                        </div>
+                    </MudItem>
+
+                    @* PRAWA: QR *@
+                    <MudItem xs="12" md="5">
+                        <MudPaper Class="pa-4 contact-panel" Elevation="0">
+
+                            <MudStack Spacing="2" AlignItems="AlignItems.Center">
+
+                                <MudText Typo="Typo.subtitle1">@L["Ui.QrHeader"]</MudText>
+
+                                @if (!string.IsNullOrWhiteSpace(_qrCodeDataUrl))
+                                {
+                                    <img src="@_qrCodeDataUrl"
+                                         alt="@L["Ui.QrAlt"]"
+                                         class="contact-qr-img" />
+                                }
+                                else
+                                {
+                                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                        @L["Ui.QrNoData"]
+                                    </MudAlert>
+                                }
+
+                                <MudText Typo="Typo.caption" Align="Align.Center" Class="mud-text-secondary">
+                                    @L["Ui.QrHint"]
+                                </MudText>
+
+                            </MudStack>
+
+                        </MudPaper>
+                    </MudItem>
+
+                </MudGrid>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                    @L["Ui.NoDataToShow"]
+                </MudAlert>
+            }
+
+        </MudStack>
+
+    </DialogContent>
+
+    <DialogActions>
+
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   OnClick="CloseDialog">
+            @L["Action.Close"]
+        </MudButton>
+
+    </DialogActions>
+
+</MudDialog>
+
+<style>
+    .contact-panel {
+        border-radius: 12px;
+    }
+
+    .contact-form-narrow {
+        width: 100%;
+        max-width: 740px;
+    }
+
+    .contact-qr-img {
+        width: 280px;
+        height: 280px;
+        border-radius: 10px;
+    }
+
+    /* Ukryj X zamykania w prawym górnym rogu (CloseButton z DialogOptions) tylko dla tego modala */
+    .contact-info-dialog .mud-dialog-title .mud-dialog-title-actions,
+    .contact-info-dialog .mud-dialog-title button {
+        display: none;
+    }
+
+    @@media (max-width: 600px) {
+        .contact-form-narrow {
+            max-width: 100%;
+        }
+
+        .contact-qr-img {
+            width: 240px;
+            height: 240px;
+        }
+    }
+</style>
+
+@code
+{
+    private const string CompanyName = "Tristone Flowtech Poland Sp. z o.o.";
+    private const string CompanyLogoFileName = "images/tristone_logo.png";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? Email { get; set; }
+
+    private Contact? _currentContact;
+
+    private bool _isLoading;
+    private string? _errorMessage;
+
+    private string? _qrCodeDataUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadContactAsync();
+    }
+
+    private async Task LoadContactAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Email))
+        {
+            _errorMessage = L["Errors.MissingEmail"].Value;
+            return;
+        }
+
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var contacts = await ContactsService.GetContactsAsync(Email);
+
+            _currentContact = contacts.FirstOrDefault(c =>
+                string.Equals(c.Email, Email, StringComparison.OrdinalIgnoreCase));
+
+            if (_currentContact is null)
+            {
+                _errorMessage = L["Errors.ContactNotFound"].Value;
+                _qrCodeDataUrl = null;
+                return;
+            }
+
+            _qrCodeDataUrl = BuildVCardQrDataUrl(_currentContact);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = L["Errors.LoadContactFailed"].Value;
+            Console.Error.WriteLine($"[ContactInfoDialog] {L["Errors.LoadContactLogPrefix"]} {ex}");
+            _qrCodeDataUrl = null;
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string NullToEmpty(string? v) => (v ?? string.Empty).Trim();
+
+    private string? BuildVCardQrDataUrl(Contact contact)
+    {
+        var firstName = (contact.Imie ?? string.Empty).Trim();
+        var lastName = (contact.Nazwisko ?? string.Empty).Trim();
+        var email = (contact.Email ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(firstName) && string.IsNullOrWhiteSpace(lastName) && string.IsNullOrWhiteSpace(email))
+            return null;
+
+        var vcard = BuildVCard(contact);
+
+        try
+        {
+            using var qrGenerator = new QRCodeGenerator();
+            using var qrData = qrGenerator.CreateQrCode(vcard, QRCodeGenerator.ECCLevel.Q);
+
+            var logoPath = Path.Combine(WebHostEnvironment.WebRootPath ?? string.Empty, CompanyLogoFileName);
+
+            if (File.Exists(logoPath))
+            {
+                using var logoBitmap = new System.Drawing.Bitmap(logoPath);
+                using var qrCode = new QRCode(qrData);
+
+                using var qrBitmap = qrCode.GetGraphic(
+                    pixelsPerModule: 8,
+                    darkColor: System.Drawing.Color.Black,
+                    lightColor: System.Drawing.Color.White,
+                    icon: logoBitmap,
+                    iconSizePercent: 22,
+                    iconBorderWidth: 8,
+                    drawQuietZones: true
+                );
+
+                using var ms = new MemoryStream();
+                qrBitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+            }
+
+            var pngBytes = new PngByteQRCode(qrData).GetGraphic(8);
+            return "data:image/png;base64," + Convert.ToBase64String(pngBytes);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ContactInfoDialog] {L["Errors.QrGenerationLogPrefix"]} {ex}");
+            return null;
+        }
+    }
+
+    private static string BuildVCard(Contact contact)
+    {
+        static string Clean(string? value)
+        {
+            value ??= string.Empty;
+            return value.Replace("\r", " ").Replace("\n", " ").Trim();
+        }
+
+        var firstName = Clean(contact.Imie);
+        var lastName = Clean(contact.Nazwisko);
+        var fullName = $"{firstName} {lastName}".Trim();
+
+        var email = Clean(contact.Email);
+        var mobile = Clean(contact.Komorkowy);
+        var landline = Clean(contact.Stacjonarny);
+
+        var department = Clean(contact.Dzial);
+        var title = Clean(contact.Stanowisko);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("BEGIN:VCARD");
+        sb.AppendLine("VERSION:3.0");
+        sb.AppendLine($"N:{lastName};{firstName};;;");
+        sb.AppendLine($"FN:{fullName}");
+        sb.AppendLine($"ORG:{CompanyName}");
+
+        if (!string.IsNullOrWhiteSpace(title))
+            sb.AppendLine($"TITLE:{title}");
+
+        if (!string.IsNullOrWhiteSpace(department))
+            sb.AppendLine($"DEPT:{department}");
+
+        if (!string.IsNullOrWhiteSpace(email))
+            sb.AppendLine($"EMAIL;TYPE=WORK,INTERNET:{email}");
+
+        if (!string.IsNullOrWhiteSpace(mobile))
+            sb.AppendLine($"TEL;TYPE=CELL:{mobile}");
+
+        if (!string.IsNullOrWhiteSpace(landline))
+            sb.AppendLine($"TEL;TYPE=WORK:{landline}");
+
+        sb.AppendLine("END:VCARD");
+        return sb.ToString();
+    }
+
+    private void CloseDialog()
+    {
+        MudDialog.Close(DialogResult.Cancel());
+    }
+}

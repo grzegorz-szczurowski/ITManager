@@ -1,0 +1,162 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Common.Null" xml:space="preserve">
+    <value>brak</value>
+  </data>
+
+	<data name="NoAccess.Message" xml:space="preserve">
+    <value>Brak dostępu do aplikacji.</value>
+  </data>
+	<data name="NoAccess.Details" xml:space="preserve">
+    <value>Login: {0}. ObjectGUID: {1}. Aktywny: {2}.</value>
+  </data>
+
+	<data name="NoModules.Message" xml:space="preserve">
+    <value>Brak dostępnych modułów w menu.</value>
+  </data>
+
+	<data name="Queue.Loading" xml:space="preserve">
+    <value>Ładowanie</value>
+  </data>
+
+	<data name="Dialog.UnknownKey" xml:space="preserve">
+    <value>Nieznany klucz dialogu: {0}.</value>
+  </data>
+	<data name="Dialog.CannotOpen" xml:space="preserve">
+    <value>Nie udało się otworzyć okna.</value>
+  </data>
+
+	<data name="Section.overview" xml:space="preserve">
+    <value>Przegląd</value>
+  </data>
+	<data name="Section.my-workspace" xml:space="preserve">
+    <value>Moja przestrzeń</value>
+  </data>
+	<data name="Section.tickets" xml:space="preserve">
+    <value>Zgłoszenia</value>
+  </data>
+	<data name="Section.projects" xml:space="preserve">
+    <value>Projekty</value>
+  </data>
+	<data name="Section.security-center" xml:space="preserve">
+    <value>Centrum bezpieczeństwa</value>
+  </data>
+	<data name="Section.it-resources" xml:space="preserve">
+    <value>Zasoby IT</value>
+  </data>
+	<data name="Section.operations" xml:space="preserve">
+    <value>Operacje</value>
+  </data>
+	<data name="Section.administration" xml:space="preserve">
+    <value>Administracja</value>
+  </data>
+	<data name="Section.system-settings" xml:space="preserve">
+    <value>Ustawienia systemu</value>
+  </data>
+
+	<data name="Item.Dashboards" xml:space="preserve">
+    <value>Dashboardy</value>
+  </data>
+	<data name="Item.Reports" xml:space="preserve">
+    <value>Raporty</value>
+  </data>
+	<data name="Item.Systems status" xml:space="preserve">
+    <value>Status systemów</value>
+  </data>
+	<data name="Item.Contacts" xml:space="preserve">
+    <value>Kontakty</value>
+  </data>
+
+	<data name="Item.Create ticket" xml:space="preserve">
+    <value>Utwórz zgłoszenie</value>
+  </data>
+	<data name="Item.My tickets" xml:space="preserve">
+    <value>Moje zgłoszenia</value>
+  </data>
+	<data name="Item.My team's tickets" xml:space="preserve">
+    <value>Zgłoszenia mojego zespołu</value>
+  </data>
+	<data name="Item.My IT equipment" xml:space="preserve">
+    <value>Mój sprzęt IT</value>
+  </data>
+
+	<data name="Item.New tickets" xml:space="preserve">
+    <value>Nowe zgłoszenia</value>
+  </data>
+	<data name="Item.Assigned to me" xml:space="preserve">
+    <value>Przypisane do mnie</value>
+  </data>
+	<data name="Item.All" xml:space="preserve">
+    <value>Wszystkie</value>
+  </data>
+	<data name="Item.Ticket scheduler" xml:space="preserve">
+    <value>Harmonogram zgłoszeń</value>
+  </data>
+
+	<data name="Item.Projects list" xml:space="preserve">
+    <value>Lista projektów</value>
+  </data>
+
+	<data name="Item.Backups" xml:space="preserve">
+    <value>Kopie zapasowe</value>
+  </data>
+
+	<data name="Item.Devices" xml:space="preserve">
+    <value>Urządzenia</value>
+  </data>
+	<data name="Item.Licenses" xml:space="preserve">
+    <value>Licencje</value>
+  </data>
+	<data name="Item.Systems" xml:space="preserve">
+    <value>Systemy</value>
+  </data>
+	<data name="Item.SIM cards" xml:space="preserve">
+    <value>Karty SIM</value>
+  </data>
+	<data name="Item.Agreements" xml:space="preserve">
+    <value>Umowy</value>
+  </data>
+	<data name="Item.Users" xml:space="preserve">
+    <value>Użytkownicy</value>
+  </data>
+
+	<data name="Item.Parts Finder" xml:space="preserve">
+    <value>Wyszukiwarka części</value>
+  </data>
+	<data name="Item.Containers" xml:space="preserve">
+    <value>Pojemniki</value>
+  </data>
+	<data name="Item.Warehouse tools" xml:space="preserve">
+    <value>Narzędzia magazynowe</value>
+  </data>
+
+	<data name="Item.Users &amp; roles" xml:space="preserve">
+    <value>Użytkownicy i role</value>
+  </data>
+	<data name="Item.Permissions" xml:space="preserve">
+    <value>Uprawnienia</value>
+  </data>
+	<data name="Item.Dictionaries" xml:space="preserve">
+    <value>Słowniki</value>
+  </data>
+
+	<data name="Item.System" xml:space="preserve">
+    <value>System</value>
+  </data>
+	<data name="Item.Profile" xml:space="preserve">
+    <value>Profil</value>
+  </data>
+</root>

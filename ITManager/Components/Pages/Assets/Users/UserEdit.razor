@@ -1,0 +1,1026 @@
+﻿@page "/assets/users/edit/{Id:int}"
+@namespace ITManager.Components.Pages.Assets.Users
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Users.View")]
+
+@* File: Components/Pages/Assets/Users/UserEdit.razor
+   Description: Ekran szczegółów użytkownika jako page (bez modala) w stylu nowego UI.
+                - Stały układ: summary header + tabs ze scrollem
+                - Start read-only, Enable edit odblokowuje edycję
+                - Kłódka na polach read-only (Adornment.End)
+                - Dirty tracking (snapshot JSON) + potwierdzenie wyjścia przy niezapisanych zmianach
+                Zakładki:
+                - Szczegóły
+                - Powiązany sprzęt (klik w wiersz otwiera podstronę DeviceEdit)
+                - Zgłoszenia
+   Version: 1.07
+   Updated: 2026-02-09
+   Change log:
+     - 1.01 (2026-02-08) Opcja B: usunięty route create, usunięte permission Create i tryb "nowy user".
+                              Save działa wyłącznie jako Update dla usera z AD.
+     - 1.02 (2026-02-08) Usunięty DeviceEditDialog: klik w sprzęt przechodzi na /assets/devices/edit/{Id}.
+     - 1.03 (2026-02-08) UI: usunięty przycisk Back z topbara i stary dolny zestaw akcji.
+                              Sticky footer: Enable edit (lewo), Save + Close (prawo).
+     - 1.04 (2026-02-08) Usunięty przycisk "Cancel changes" z topbara (pozostaje mechanizm ostrzegania przy wyjściu).
+     - 1.05 (2026-02-09) UI: elastyczny grid bez stałych szerokości.
+     - 1.06 (2026-02-09) UI: grid Sprzęt i Tickets ujednolicony do mechanizmu DevicesIndex (procenty, fixed, ellipsis).
+     - 1.07 (2026-02-09) Equipment: dodana kolumna Hostname zaraz za Type.
+   Notes:
+     - Routing:
+         /assets/users/edit/{Id}
+     - Uprawnienia:
+         View: Assets.Users.View (page-level policy)
+         Edit: Assets.Users.Edit (Enable edit + zapis)
+     - returnUrl:
+         query string ?returnUrl=... (powrót po Close / po zapisie)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Text.Json
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject UsersService UsersService
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject IStringLocalizer<UserEdit> L
+
+<MudPaper Elevation="0" Class="user-edit-root pa-4">
+
+    <MudStack Spacing="2">
+
+        @if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(_errorText))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-2">
+                    @_errorText
+                </MudAlert>
+            }
+
+            <div class="user-edit-content">
+
+                @if (_loading)
+                {
+                    <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="user-edit-loading">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1" Class="mt-2">@L["LoadingData"]</MudText>
+                    </MudStack>
+                }
+                else
+                {
+                    <MudPaper Elevation="0" Class="user-summary">
+                        <MudStack Spacing="1">
+
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="user-summary-top">
+                                <MudText Typo="Typo.h6" Class="user-summary-title">
+                                    @_headerTitle
+                                </MudText>
+
+                                <MudChip T="string"
+                                         Color="@GetActiveChipColor()"
+                                         Variant="Variant.Filled"
+                                         Size="Size.Small"
+                                         Class="ml-2">
+                                    @GetActiveChipText()
+                                </MudChip>
+
+                                @if (!string.IsNullOrWhiteSpace(GetSelectedAccountTypeName()))
+                                {
+                                    <MudChip T="string"
+                                             Color="Color.Info"
+                                             Variant="Variant.Outlined"
+                                             Size="Size.Small"
+                                             Class="ml-2">
+                                        @GetSelectedAccountTypeName()
+                                    </MudChip>
+                                }
+
+                                @if (!_canEdit)
+                                {
+                                    <MudChip T="string"
+                                             Color="Color.Warning"
+                                             Variant="Variant.Outlined"
+                                             Size="Size.Small"
+                                             Class="ml-2">
+                                        Read-only
+                                    </MudChip>
+                                }
+
+                                @if (_isEditEnabled && _canEdit && _isDirty)
+                                {
+                                    <MudChip T="string"
+                                             Variant="Variant.Filled"
+                                             Color="Color.Warning"
+                                             Size="Size.Small"
+                                             Class="ml-2">
+                                        Unsaved
+                                    </MudChip>
+                                }
+
+                                <MudSpacer />
+                            </MudStack>
+
+                            <MudText Typo="Typo.body2" Class="user-summary-subtitle">
+                                @BuildUserSubtitle()
+                            </MudText>
+
+                            <MudGrid Spacing="1" AlignItems="AlignItems.Center" Class="user-summary-grid">
+
+                                <MudItem xs="12" sm="6" md="6" Class="user-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="user-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Badge" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Field.DisplayName"]:</b> @GetSafe(_user?.DisplayName, "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="user-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="user-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Email" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Field.Email"]:</b> <span class="user-mono">@GetSafe(_user?.EmailAddress, "-")</span>
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="user-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="user-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Apartment" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Field.Department"]:</b> @GetSafe(_user?.Department, "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" sm="6" md="6" Class="user-summary-cell">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="user-summary-item">
+                                        <MudIcon Icon="@Icons.Material.Filled.Work" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2">
+                                            <b>@L["Field.Title"]:</b> @GetSafe(_user?.Title, "-")
+                                        </MudText>
+                                    </MudStack>
+                                </MudItem>
+
+                            </MudGrid>
+
+                        </MudStack>
+                    </MudPaper>
+
+                    <MudPaper Elevation="0" Class="user-tabs">
+                        <MudTabs Rounded="true" Elevation="0" KeepPanelsAlive="true">
+
+                            <MudTabPanel Text="@L["Tab.Details"]" Icon="@Icons.Material.Filled.Person">
+                                <div class="user-tab-scroll">
+                                    <MudForm @ref="_form">
+                                        <MudGrid Spacing="2">
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.DisplayName"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.DisplayName, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Email"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.EmailAddress, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Phone"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.TelephoneNumber, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Mobile"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.Mobile, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Department"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.Department, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                <MudTextField T="string"
+                                                              Label="@L["Field.Title"]"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              ReadOnly="true"
+                                                              Value="@GetSafe(_editModel.Title, "-")"
+                                                              Adornment="@LockAdornment"
+                                                              AdornmentIcon="@LockIcon"
+                                                              AdornmentColor="Color.Default" />
+                                            </MudItem>
+
+                                            <MudItem xs="12" md="6">
+                                                @if (!_isEditEnabled)
+                                                {
+                                                    <MudTextField T="string"
+                                                                  Label="@L["Field.AccountType"]"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  ReadOnly="true"
+                                                                  Value="@GetSafe(GetSelectedAccountTypeName(), "-")"
+                                                                  Adornment="@LockAdornment"
+                                                                  AdornmentIcon="@LockIcon"
+                                                                  AdornmentColor="Color.Default" />
+                                                }
+                                                else
+                                                {
+                                                    <MudSelect T="int?"
+                                                               Label="@L["Field.AccountType"]"
+                                                               Variant="Variant.Outlined"
+                                                               Margin="Margin.Dense"
+                                                               Dense="true"
+                                                               DisableUnderline="true"
+                                                               Value="@_editModel.AccountTypeId"
+                                                               ValueChanged="OnAccountTypeChangedAsync"
+                                                               Disabled="@(_loading || !_canEdit)"
+                                                               Clearable="true">
+                                                        @foreach (var t in _accountTypes)
+                                                        {
+                                                            <MudSelectItem Value="@((int?)t.Id)">@t.Name</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+
+                                                    @if (!string.IsNullOrWhiteSpace(_accountTypeLoadError))
+                                                    {
+                                                        <MudText Typo="Typo.caption" Class="mt-1" Style="opacity:0.85;">
+                                                            @_accountTypeLoadError
+                                                        </MudText>
+                                                    }
+                                                }
+                                            </MudItem>
+
+                                        </MudGrid>
+                                    </MudForm>
+                                </div>
+                            </MudTabPanel>
+
+                            <MudTabPanel Text="@L["Tab.Equipment"]" Icon="@Icons.Material.Filled.DevicesOther">
+                                <div class="user-tab-scroll">
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2">
+                                        <MudText Typo="Typo.subtitle1">@L["Equipment.Title"]</MudText>
+
+                                        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew"
+                                                       Color="Color.Primary"
+                                                       Variant="Variant.Text"
+                                                       Disabled="@_loading"
+                                                       OnClick="OpenEquipmentList" />
+                                    </MudStack>
+
+                                    <MudDataGrid T="UsersService.UserRelatedDeviceRow"
+                                                 Items="@_relatedDevices"
+                                                 Dense="true"
+                                                 Hover="true"
+                                                 Bordered="false"
+                                                 Elevation="0"
+                                                 Breakpoint="Breakpoint.Sm"
+                                                 HorizontalScrollbar="false"
+                                                 Filterable="true"
+                                                 SortMode="SortMode.Multiple"
+                                                 Class="user-related-grid equipment-grid"
+                                                 RowClick="OnDeviceRowClickAsync">
+
+                                        <Columns>
+                                            <PropertyColumn Property="x => x.Type"
+                                                            Title="@L["Equipment.Col.Type"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:14%;"
+                                                            CellStyle="width:14%;" />
+
+                                            <PropertyColumn Property="x => x.Hostname"
+                                                            Title="@L["Equipment.Col.Hostname"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:18%;"
+                                                            CellStyle="width:18%;" />
+
+                                            <PropertyColumn Property="x => x.ProducerModel"
+                                                            Title="@L["Equipment.Col.Model"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:26%;"
+                                                            CellStyle="width:26%;" />
+
+                                            <PropertyColumn Property="x => x.SerialNumber"
+                                                            Title="@L["Equipment.Col.SerialNumber"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:16%;"
+                                                            CellStyle="width:16%;" />
+
+                                            <PropertyColumn Property="x => x.AssetTag"
+                                                            Title="@L["Equipment.Col.AssetTag"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:12%;"
+                                                            CellStyle="width:12%;" />
+
+                                            <PropertyColumn Property="x => x.Location"
+                                                            Title="@L["Equipment.Col.Location"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:14%;"
+                                                            CellStyle="width:14%;" />
+
+                                            <PropertyColumn Property="x => x.Status"
+                                                            Title="@L["Equipment.Col.Status"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:6%;"
+                                                            CellStyle="width:6%;" />
+                                        </Columns>
+
+                                        <NoRecordsContent>
+                                            <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                                @L["Equipment.NoRecords"]
+                                            </MudText>
+                                        </NoRecordsContent>
+
+                                    </MudDataGrid>
+
+                                </div>
+                            </MudTabPanel>
+
+                            <MudTabPanel Text="@L["Tab.Tickets"]" Icon="@Icons.Material.Filled.ConfirmationNumber">
+                                <div class="user-tab-scroll">
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2">
+                                        <MudText Typo="Typo.subtitle1">@L["Tickets.Title"]</MudText>
+
+                                        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew"
+                                                       Color="Color.Primary"
+                                                       Variant="Variant.Text"
+                                                       Disabled="@_loading"
+                                                       OnClick="OpenTicketsList" />
+                                    </MudStack>
+
+                                    <MudDataGrid T="UsersService.UserRelatedTicketRow"
+                                                 Items="@_relatedTickets"
+                                                 Dense="true"
+                                                 Hover="true"
+                                                 Bordered="false"
+                                                 Elevation="0"
+                                                 Breakpoint="Breakpoint.Sm"
+                                                 HorizontalScrollbar="false"
+                                                 Filterable="true"
+                                                 SortMode="SortMode.Multiple"
+                                                 Class="user-related-grid tickets-grid"
+                                                 RowClick="OnTicketRowClickAsync">
+
+                                        <Columns>
+                                            <PropertyColumn Property="x => x.TicketCode"
+                                                            Title="@L["Tickets.Col.TicketCode"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:14%;"
+                                                            CellStyle="width:14%;" />
+
+                                            <PropertyColumn Property="x => x.Title"
+                                                            Title="@L["Tickets.Col.Title"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:46%;"
+                                                            CellStyle="width:46%;" />
+
+                                            <PropertyColumn Property="x => x.Status"
+                                                            Title="@L["Tickets.Col.Status"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:12%;"
+                                                            CellStyle="width:12%;" />
+
+                                            <PropertyColumn Property="x => x.Priority"
+                                                            Title="@L["Tickets.Col.Priority"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            HeaderStyle="width:12%;"
+                                                            CellStyle="width:12%;" />
+
+                                            <PropertyColumn Property="x => x.UpdatedAt"
+                                                            Title="@L["Tickets.Col.Updated"]"
+                                                            Sortable="true"
+                                                            Filterable="true"
+                                                            Format="yyyy-MM-dd HH:mm"
+                                                            HeaderStyle="width:16%;"
+                                                            CellStyle="width:16%;" />
+                                        </Columns>
+
+                                        <NoRecordsContent>
+                                            <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                                @L["Tickets.NoRecords"]
+                                            </MudText>
+                                        </NoRecordsContent>
+
+                                    </MudDataGrid>
+
+                                </div>
+                            </MudTabPanel>
+
+                        </MudTabs>
+                    </MudPaper>
+                }
+
+            </div>
+
+            <MudPaper Elevation="0" Class="user-footer">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="user-footer-inner">
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="@(_isEditEnabled ? Color.Default : Color.Primary)"
+                               StartIcon="@(_isEditEnabled ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                               OnClick="ToggleEditMode"
+                               Disabled="@(_loading || !_canEdit)">
+                        @(_isEditEnabled? L["Lock"].Value : L["EnableEdit"].Value)
+                    </MudButton>
+
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SaveAsync"
+                                   Disabled="@(!_isEditEnabled || _loading || !_isDirty || !_canEdit)">
+                            @L["Save"]
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Close"
+                                   OnClick="CloseAsync"
+                                   Disabled="@_loading">
+                            @L["Close"]
+                        </MudButton>
+                    </MudStack>
+
+                </MudStack>
+            </MudPaper>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .user-edit-root {
+        width: 100%;
+        box-sizing: border-box;
+        position: relative;
+        padding-bottom: 78px;
+    }
+
+    .user-edit-content {
+        width: 100%;
+        height: 720px;
+        max-height: 720px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+    }
+
+    .user-edit-loading {
+        height: 720px;
+    }
+
+    .user-summary {
+        padding: 14px;
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        margin-bottom: 12px;
+        background: rgba(255,255,255,0.02);
+        flex: 0 0 auto;
+        box-sizing: border-box;
+    }
+
+    .user-summary-top {
+        min-width: 0;
+    }
+
+    .user-summary-title {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .user-summary-subtitle {
+        opacity: 0.85;
+        margin-top: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .user-summary-grid {
+        margin-top: 6px;
+    }
+
+    .user-summary-cell {
+        display: flex;
+        min-width: 0;
+    }
+
+    .user-summary-item {
+        width: 100%;
+        min-height: 30px;
+        line-height: 1.2;
+        min-width: 0;
+    }
+
+    .user-tabs {
+        border: 1px solid var(--mud-palette-lines-default);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.02);
+        flex: 1 1 auto;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+    }
+
+    .user-tab-scroll {
+        height: 100%;
+        overflow: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .user-mono {
+        font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .user-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        border-top: 1px solid var(--mud-palette-lines-default);
+        background: var(--mud-palette-surface);
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        box-sizing: border-box;
+    }
+
+    .user-footer-inner {
+        min-width: 0;
+    }
+
+    .user-related-grid {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Mechanizm jak w DevicesIndex: table-layout fixed + ellipsis */
+    .equipment-grid table,
+    .tickets-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .equipment-grid th,
+    .equipment-grid td,
+    .tickets-grid th,
+    .tickets-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private bool _loading = true;
+    private bool _ready;
+    private bool _canView;
+    private bool _canEdit;
+
+    private bool _isEditEnabled;
+    private bool _isDirty;
+
+    private string _originalEditJson = string.Empty;
+    private string _headerTitle = string.Empty;
+    private string _errorText = string.Empty;
+
+    private UsersService.UserHeaderDto? _user;
+    private UsersService.UserEditModel _editModel = new();
+
+    private List<UsersService.UserRelatedDeviceRow> _relatedDevices = new();
+    private List<UsersService.UserRelatedTicketRow> _relatedTickets = new();
+
+    private MudForm? _form;
+
+    private List<UsersService.AccountTypeDto> _accountTypes = new();
+    private string _accountTypeLoadError = string.Empty;
+
+    private Adornment LockAdornment => !_isEditEnabled ? Adornment.End : Adornment.None;
+    private string? LockIcon => !_isEditEnabled ? Icons.Material.Filled.Lock : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _errorText = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            _canView = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Assets.Users.View");
+            _canEdit = _canView && ctx.Has("Assets.Users.Edit");
+
+            _ready = true;
+
+            if (!_canView)
+                return;
+
+            if (Id <= 0)
+            {
+                _errorText = L["InvalidIdError"];
+                return;
+            }
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorText = string.Empty;
+
+        if (Id <= 0)
+        {
+            _errorText = L["InvalidIdError"];
+            _user = null;
+            _editModel = new UsersService.UserEditModel { Id = 0 };
+            _relatedDevices = new();
+            _relatedTickets = new();
+            SnapshotOriginal();
+            _isEditEnabled = false;
+            return;
+        }
+
+        try
+        {
+            var result = await UsersService.GetUserEditDataAsync(Id);
+
+            if (!result.IsOk)
+            {
+                _errorText = result.ErrorMessage;
+                _user = null;
+                _editModel = new UsersService.UserEditModel { Id = Id };
+                _relatedDevices = new();
+                _relatedTickets = new();
+                SnapshotOriginal();
+                _isEditEnabled = false;
+                return;
+            }
+
+            _user = result.User;
+            _editModel = result.EditModel ?? new UsersService.UserEditModel { Id = Id };
+
+            _headerTitle = !string.IsNullOrWhiteSpace(_user?.DisplayName)
+                ? _user!.DisplayName!
+                : L["DialogTitleFallback"].Value;
+
+            _relatedDevices = result.RelatedDevices ?? new();
+            _relatedTickets = result.RelatedTickets ?? new();
+
+            SnapshotOriginal();
+            _isEditEnabled = false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UserEdit] LoadAsync ERROR: {ex}");
+            _errorText = L["LoadFailedTryLater"];
+            _user = null;
+            _editModel = new UsersService.UserEditModel { Id = Id };
+            _relatedDevices = new();
+            _relatedTickets = new();
+            SnapshotOriginal();
+            _isEditEnabled = false;
+        }
+    }
+
+    private void ToggleEditMode()
+    {
+        if (_loading || !_canEdit)
+            return;
+
+        _isEditEnabled = !_isEditEnabled;
+
+        if (_isEditEnabled)
+            _ = LoadAccountTypesAsync();
+
+        if (!_isEditEnabled)
+            RevertChanges();
+    }
+
+    private async Task LoadAccountTypesAsync()
+    {
+        if (_accountTypes.Count > 0)
+            return;
+
+        _accountTypeLoadError = string.Empty;
+
+        try
+        {
+            var list = await UsersService.GetAccountTypesAsync(onlyActive: true);
+            _accountTypes = list ?? new List<UsersService.AccountTypeDto>();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UserEdit] LoadAccountTypesAsync ERROR: {ex}");
+            _accountTypes = new();
+            _accountTypeLoadError = L["AccountTypeLoadFailed"];
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string GetSelectedAccountTypeName()
+    {
+        var id = _editModel.AccountTypeId ?? _user?.AccountTypeId;
+
+        if (id.HasValue && id.Value > 0)
+        {
+            var fromLookup = _accountTypes.FirstOrDefault(x => x.Id == id.Value)?.Name;
+            if (!string.IsNullOrWhiteSpace(fromLookup))
+                return fromLookup!;
+        }
+
+        return GetSafe(_user?.AccountTypeName);
+    }
+
+    private string BuildUserSubtitle()
+    {
+        var email = GetSafe(_user?.EmailAddress);
+        var dept = GetSafe(_user?.Department);
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(dept))
+            parts.Add(dept);
+        if (!string.IsNullOrWhiteSpace(email))
+            parts.Add(email);
+
+        if (parts.Count == 0)
+            return _headerTitle;
+
+        return string.Join(" | ", parts);
+    }
+
+    private void SnapshotOriginal()
+    {
+        _originalEditJson = SerializeEdit(_editModel);
+        _isDirty = false;
+    }
+
+    private void MarkDirty()
+    {
+        if (string.IsNullOrWhiteSpace(_originalEditJson))
+        {
+            _isDirty = true;
+            return;
+        }
+
+        var current = SerializeEdit(_editModel);
+        _isDirty = !string.Equals(_originalEditJson, current, StringComparison.Ordinal);
+    }
+
+    private static string SerializeEdit(UsersService.UserEditModel model)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = null
+        };
+
+        return JsonSerializer.Serialize(model ?? new UsersService.UserEditModel(), options);
+    }
+
+    private void RevertChanges()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_originalEditJson))
+                return;
+
+            var restored = JsonSerializer.Deserialize<UsersService.UserEditModel>(_originalEditJson);
+            if (restored == null)
+                return;
+
+            _editModel = restored;
+            _isDirty = false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UserEdit] RevertChanges ERROR: {ex}");
+            Snackbar.Add(L["RevertFailed"], Severity.Error);
+        }
+    }
+
+    private Task OnAccountTypeChangedAsync(int? value)
+    {
+        _editModel.AccountTypeId = (value.HasValue && value.Value > 0) ? value : null;
+        MarkDirty();
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_canView || !_canEdit)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return;
+        }
+
+        if (Id <= 0 || _editModel.Id <= 0)
+        {
+            Snackbar.Add(L["InvalidIdError"], Severity.Warning);
+            return;
+        }
+
+        if (!_isEditEnabled || _loading || !_isDirty)
+            return;
+
+        _loading = true;
+        _errorText = string.Empty;
+
+        try
+        {
+            if (_form != null)
+                await _form.Validate();
+
+            if (_form != null && !_form.IsValid)
+            {
+                Snackbar.Add(L["Validation.FormInvalid"], Severity.Warning);
+                return;
+            }
+
+            var saveResult = await UsersService.UpdateUserAsync(_editModel);
+
+            if (!saveResult.IsOk)
+            {
+                Snackbar.Add(saveResult.ErrorMessage, Severity.Error);
+                return;
+            }
+
+            Snackbar.Add(L["Saved"], Severity.Success);
+            NavigateBack(force: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UserEdit] SaveAsync ERROR: {ex}");
+            Snackbar.Add(L["SaveFailedTryLater"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_loading)
+            return;
+
+        if (_isEditEnabled && _isDirty)
+        {
+            var discard = await DialogService.ShowMessageBox(
+                title: L["UnsavedTitle"],
+                message: L["UnsavedMessage"],
+                yesText: L["DiscardAndClose"],
+                cancelText: L["Stay"]
+            );
+
+            if (discard != true)
+                return;
+        }
+
+        NavigateBack(force: true);
+    }
+
+    private void NavigateBack(bool force)
+    {
+        var url = (ReturnUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(url))
+            url = "/assets/users";
+
+        Nav.NavigateTo(url, forceLoad: false, replace: force);
+    }
+
+    private Task OpenEquipmentList()
+    {
+        Nav.NavigateTo("/assets/devices");
+        return Task.CompletedTask;
+    }
+
+    private Task OpenTicketsList()
+    {
+        Nav.NavigateTo("/tickets");
+        return Task.CompletedTask;
+    }
+
+    private Task OnDeviceRowClickAsync(DataGridRowClickEventArgs<UsersService.UserRelatedDeviceRow> args)
+    {
+        if (_loading)
+            return Task.CompletedTask;
+
+        if (args?.Item == null || args.Item.Id <= 0)
+            return Task.CompletedTask;
+
+        var returnUrl = Uri.EscapeDataString("/assets/users/edit/" + Id);
+        Nav.NavigateTo("/assets/devices/edit/" + args.Item.Id + "?returnUrl=" + returnUrl);
+        return Task.CompletedTask;
+    }
+
+    private Task OnTicketRowClickAsync(DataGridRowClickEventArgs<UsersService.UserRelatedTicketRow> args)
+    {
+        if (args?.Item == null || args.Item.Id <= 0)
+            return Task.CompletedTask;
+
+        var returnUrl = Uri.EscapeDataString("/assets/users/edit/" + Id);
+        Nav.NavigateTo("/tickets/" + args.Item.TicketCode + "?returnUrl=" + returnUrl);
+        return Task.CompletedTask;
+    }
+
+    private Color GetActiveChipColor() => (_user?.IsActive == true) ? Color.Success : Color.Secondary;
+    private string GetActiveChipText() => (_user?.IsActive == true) ? L["AccountActive"].Value : L["AccountInactive"].Value;
+
+    private static string GetSafe(string? value, string fallback = "")
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? fallback : v;
+    }
+}

@@ -1,0 +1,819 @@
+﻿@page "/tickets/scheduler"
+@rendermode InteractiveServer
+@namespace ITManager.Components.Pages.Tickets.Scheduler
+
+@* File: Components/Pages/TicketsScheduler.razor
+   Description: Szablony i harmonogramy automatycznego tworzenia ticketów (Definitions + Runs).
+   Updated: 2026-01-23
+     - i18n PL/EN via IStringLocalizer<TicketsScheduler> (resx obok komponentu)
+     - UX jak Contacts/Devices: fixed layout + procenty + ellipsis, bez horizontal scroll
+     - Overlay loader ograniczony do kontenera treści (nie zasłania całej strony)
+     - Disabled controls spójnie: (_loading)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Data
+@using System.Data.SqlClient
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Configuration
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Services.Auth
+@using ITManager.Services.Scheduling
+@using ITManager.Components.Pages.Tickets.Scheduler
+
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IConfiguration Configuration
+@inject IStringLocalizer<Scheduler> L
+
+@inject ScheduledTicketDefinitionsService DefinitionsService
+@inject TicketSchedulingRepository SchedulingRepo
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* Header: tytuł + refresh *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Class="mb-1">
+
+            <MudStack Spacing="0">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Primary"
+                                   Disabled="@_loading"
+                                   OnClick="ReloadAllAsync" />
+                </MudStack>
+
+                <MudText Typo="Typo.body2" Color="Color.Primary">
+                    @L["Subtitle"]
+                </MudText>
+            </MudStack>
+
+        </MudStack>
+
+        @* Kontener treści: overlay ma zasłaniać tylko ten obszar *@
+        <div class="scheduler-content-container">
+
+            <MudTabs Rounded="true" Elevation="0" PanelClass="pt-3">
+
+                <MudTabPanel Text="@L["Tab_Definitions"]" Icon="@Icons.Material.Filled.EventRepeat">
+
+                    <MudStack Row="true" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.End" Class="mb-3">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   Disabled="@_loading"
+                                   OnClick="NewDefinitionAsync">
+                            @L["NewDefinition"]
+                        </MudButton>
+                    </MudStack>
+
+                    <MudDataGrid T="ScheduledTicketDefinitionDto"
+                                 Class="scheduler-grid"
+                                 Items="_definitions"
+                                 Dense="true"
+                                 Hover="true"
+                                 Bordered="false"
+                                 Elevation="0"
+                                 Breakpoint="Breakpoint.Sm"
+                                 HorizontalScrollbar="false"
+                                 RowClick="OnDefinitionRowClick"
+                                 RowClassFunc="GetRowClass"
+                                 @bind-RowsPerPage="_rowsPerPage">
+
+                        <PagerContent>
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                                <MudDataGridPager T="ScheduledTicketDefinitionDto" PageSizeOptions="@_rowsPerPageOptions" />
+                            </MudStack>
+                        </PagerContent>
+
+                        <Columns>
+
+                            <PropertyColumn Property="x => x.Name"
+                                            Title="@L["Col_Name"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:22%;"
+                                            CellStyle="width:22%;"
+                                            Grow="true" />
+
+                            <TemplateColumn Title="@L["Col_NextRunLocal"]"
+                                            Sortable="true"
+                                            SortBy="@(x => x.ScheduleNextRunAtUtc)"
+                                            HeaderStyle="width:12%;"
+                                            CellStyle="width:12%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @FormatLocal(cell.Item.ScheduleNextRunAtUtc)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_LastRunLocal"]"
+                                            Sortable="true"
+                                            SortBy="@(x => x.ScheduleLastRunAtUtc)"
+                                            HeaderStyle="width:12%;"
+                                            CellStyle="width:12%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @FormatLocal(cell.Item.ScheduleLastRunAtUtc)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Requester"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:14%;"
+                                            CellStyle="width:14%;">
+                                <CellTemplate Context="cell">
+                                    @GetRequesterName(cell.Item.RequesterUserId)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Category"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:12%;"
+                                            CellStyle="width:12%;">
+                                <CellTemplate Context="cell">
+                                    @GetCategoryName(cell.Item.CategoryId)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Impact"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:8%;"
+                                            CellStyle="width:8%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @ImpactText(cell.Item.Impact)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Urgency"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:8%;"
+                                            CellStyle="width:8%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @UrgencyText(cell.Item.Urgency)
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Priority"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:12%;"
+                                            CellStyle="width:12%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @{
+                                        var p = PriorityFor(cell.Item);
+                                    }
+                                    <MudChip T="string"
+                                             Color="@p.Color"
+                                             Size="Size.Small"
+                                             Variant="Variant.Filled"
+                                             Class="scheduler-chip">
+                                        @p.Text
+                                    </MudChip>
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                        </Columns>
+
+                        <NoRecordsContent>
+                            <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                @L["NoDefinitions"]
+                            </MudText>
+                        </NoRecordsContent>
+
+                    </MudDataGrid>
+
+                </MudTabPanel>
+
+                <MudTabPanel Text="@L["Tab_Runs"]" Icon="@Icons.Material.Filled.History">
+
+                    <MudDataGrid T="TicketSchedulerRunDto"
+                                 Class="scheduler-grid"
+                                 Items="_runs"
+                                 Dense="true"
+                                 Hover="true"
+                                 Bordered="false"
+                                 Elevation="0"
+                                 Breakpoint="Breakpoint.Sm"
+                                 HorizontalScrollbar="false"
+                                 RowClassFunc="GetRunRowClass"
+                                 @bind-RowsPerPage="_runsRowsPerPage">
+
+                        <PagerContent>
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                                <MudDataGridPager T="TicketSchedulerRunDto" PageSizeOptions="@_runsRowsPerPageOptions" />
+                            </MudStack>
+                        </PagerContent>
+
+                        <Columns>
+
+                            <TemplateColumn Title="@L["Col_RunAtLocal"]"
+                                            HeaderStyle="width:16%;"
+                                            CellStyle="width:16%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    @SchedulingRepo.ToPlantLocalTime(cell.Item.RunAtUtc).ToString("yyyy-MM-dd HH:mm:ss")
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Definition"]"
+                                            HeaderStyle="width:20%;"
+                                            CellStyle="width:20%;">
+                                <CellTemplate Context="cell">
+                                    @cell.Item.DefinitionName
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Result"]"
+                                            HeaderStyle="width:12%;"
+                                            CellStyle="width:12%; white-space:nowrap;">
+                                <CellTemplate Context="cell">
+                                    <MudChip T="string"
+                                             Color="@ResultColor(cell.Item.ResultCode)"
+                                             Size="Size.Small"
+                                             Variant="Variant.Filled"
+                                             Class="scheduler-chip">
+                                        @ResultText(cell.Item.ResultCode)
+                                    </MudChip>
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_TicketId"]"
+                                            HeaderStyle="width:8%;"
+                                            CellStyle="width:8%; white-space:nowrap; text-align:center;">
+                                <CellTemplate Context="cell">
+                                    @(cell.Item.TicketId?.ToString() ?? "-")
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                            <TemplateColumn Title="@L["Col_Message"]"
+                                            HeaderStyle="width:44%;"
+                                            CellStyle="width:44%;"
+                                            Grow="true">
+                                <CellTemplate Context="cell">
+                                    @(cell.Item.Message ?? "-")
+                                </CellTemplate>
+                            </TemplateColumn>
+
+                        </Columns>
+
+                        <NoRecordsContent>
+                            <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                @L["NoRuns"]
+                            </MudText>
+                        </NoRecordsContent>
+
+                    </MudDataGrid>
+
+                </MudTabPanel>
+
+            </MudTabs>
+
+            @* Overlay tylko na kontener treści *@
+            <MudOverlay Visible="@_loading"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Absolute="true"
+                        Class="scheduler-overlay">
+                <MudPaper Class="pa-6 scheduler-overlay-card">
+                    <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1">
+                            @L["LoadingData"]
+                        </MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudOverlay>
+
+        </div>
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .scheduler-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .scheduler-overlay {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .scheduler-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .scheduler-row {
+        min-height: 44px;
+    }
+
+        .scheduler-row td,
+        .scheduler-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .scheduler-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+            cursor: pointer;
+        }
+
+    .scheduler-run-row {
+        min-height: 44px;
+    }
+
+        .scheduler-run-row td,
+        .scheduler-run-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .scheduler-run-row:hover {
+            background-color: rgba(2, 136, 209, 0.08);
+        }
+
+    .scheduler-chip {
+        min-width: 110px;
+        justify-content: center;
+        font-weight: 600;
+    }
+
+    .scheduler-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .scheduler-grid th,
+    .scheduler-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code {
+
+    private bool _loading = true;
+    private int _currentUserId;
+
+    private List<ScheduledTicketDefinitionDto> _definitions = new();
+    private List<TicketSchedulerRunDto> _runs = new();
+
+    private Dictionary<int, (string Name, bool? IsActive)> _userById = new();
+    private Dictionary<int, string> _categoryById = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 50, 100, 200, 500, 1000 };
+
+    private int _runsRowsPerPage = 100;
+    private int[] _runsRowsPerPageOptions = new[] { 50, 100, 200, 500 };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        var canManage = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Tickets.Scheduler.Manage");
+        if (!canManage)
+        {
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        var userId = ctx.UserId ?? 0;
+        if (userId <= 0)
+        {
+            Snackbar.Add(L["Msg_NoUserIdInContext"], Severity.Error);
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _currentUserId = userId;
+        await ReloadAllAsync();
+    }
+
+    private async Task ReloadAllAsync()
+    {
+        _loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            _definitions = await DefinitionsService.GetDefinitionsAsync();
+            _runs = await SchedulingRepo.GetRecentSchedulerRunsAsync(200);
+
+            await LoadLookupsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(string.Format(L["Msg_LoadingError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        var requesterIds = _definitions
+            .Select(d => d.RequesterUserId)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        _userById = await TryLoadUsersByIdsAsync(requesterIds);
+
+        var categoryIds = _definitions
+            .Select(d => d.CategoryId)
+            .Where(id => id.HasValue && id.Value > 0)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        _categoryById = await TryLoadCategoryNamesByIdsAsync(categoryIds);
+    }
+
+    private string GetConnectionString()
+        => Configuration.GetConnectionString("ITManagerConnection")
+           ?? Configuration["ConnectionStrings:ITManagerConnection"]
+           ?? string.Empty;
+
+    private static List<string> BuildParamList(SqlCommand cmd, string prefix, IReadOnlyList<int> values)
+    {
+        var names = new List<string>();
+        for (int i = 0; i < values.Count; i++)
+        {
+            var pn = $"{prefix}{i}";
+            names.Add(pn);
+            cmd.Parameters.AddWithValue(pn, values[i]);
+        }
+        return names;
+    }
+
+    private async Task<Dictionary<int, (string Name, bool? IsActive)>> TryLoadUsersByIdsAsync(List<int> userIds)
+    {
+        var map = new Dictionary<int, (string Name, bool? IsActive)>();
+        if (userIds == null || userIds.Count == 0)
+            return map;
+
+        var cs = GetConnectionString();
+        if (string.IsNullOrWhiteSpace(cs))
+            return map;
+
+        try
+        {
+            using var con = new SqlConnection(cs);
+            using var cmd = con.CreateCommand();
+            cmd.CommandType = CommandType.Text;
+
+            var p = BuildParamList(cmd, "@u", userIds);
+
+            cmd.CommandText =
+                $"SELECT id, DisplayName, IsActive FROM dbo.users WHERE id IN ({string.Join(",", p)})";
+
+            await con.OpenAsync();
+            using var rdr = await cmd.ExecuteReaderAsync();
+
+            while (await rdr.ReadAsync())
+            {
+                var id = Convert.ToInt32(rdr["id"]);
+                var name = (rdr["DisplayName"] as string ?? string.Empty).Trim();
+                bool? isActive = null;
+
+                if (rdr["IsActive"] != DBNull.Value)
+                    isActive = Convert.ToBoolean(rdr["IsActive"]);
+
+                if (string.IsNullOrWhiteSpace(name))
+                    name = id.ToString();
+
+                map[id] = (name, isActive);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Scheduler.TryLoadUsersByIdsAsync] INFO: {ex.Message}");
+        }
+
+        return map;
+    }
+
+    private async Task<Dictionary<int, string>> TryLoadCategoryNamesByIdsAsync(List<int> categoryIds)
+    {
+        var map = new Dictionary<int, string>();
+        if (categoryIds == null || categoryIds.Count == 0)
+            return map;
+
+        var cs = GetConnectionString();
+        if (string.IsNullOrWhiteSpace(cs))
+            return map;
+
+        var candidates = new (string Sql, string IdCol, string NameCol)[]
+        {
+            ("SELECT CategoryId, Name FROM dbo.ticket_categories WHERE CategoryId IN ({0})", "CategoryId", "Name"),
+            ("SELECT Id, Name FROM dbo.ticket_categories WHERE Id IN ({0})", "Id", "Name"),
+            ("SELECT id, name FROM dbo.ticket_categories WHERE id IN ({0})", "id", "name"),
+            ("SELECT CategoryId, CategoryName FROM dbo.ticket_categories WHERE CategoryId IN ({0})", "CategoryId", "CategoryName"),
+            ("SELECT Id, CategoryName FROM dbo.ticket_categories WHERE Id IN ({0})", "Id", "CategoryName")
+        };
+
+        try
+        {
+            using var con = new SqlConnection(cs);
+            await con.OpenAsync();
+
+            foreach (var c in candidates)
+            {
+                try
+                {
+                    using var cmd = con.CreateCommand();
+                    cmd.CommandType = CommandType.Text;
+
+                    var p = BuildParamList(cmd, "@c", categoryIds);
+                    cmd.CommandText = string.Format(c.Sql, string.Join(",", p));
+
+                    using var rdr = await cmd.ExecuteReaderAsync();
+                    while (await rdr.ReadAsync())
+                    {
+                        var idObj = rdr[c.IdCol];
+                        var nameObj = rdr[c.NameCol];
+
+                        if (idObj == null || idObj == DBNull.Value)
+                            continue;
+
+                        var id = Convert.ToInt32(idObj);
+                        var name = (nameObj as string ?? string.Empty).Trim();
+
+                        if (!string.IsNullOrWhiteSpace(name))
+                            map[id] = name;
+                    }
+
+                    if (map.Count > 0)
+                        break;
+                }
+                catch (Exception qex)
+                {
+                    Console.Error.WriteLine($"[Scheduler.TryLoadCategoryNamesByIdsAsync] INFO: {qex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Scheduler.TryLoadCategoryNamesByIdsAsync] INFO: {ex.Message}");
+        }
+
+        return map;
+    }
+
+    private string FormatLocal(DateTime? utc)
+    {
+        if (!utc.HasValue)
+            return "-";
+
+        return SchedulingRepo.ToPlantLocalTime(utc.Value).ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private string GetRequesterName(int requesterUserId)
+    {
+        if (requesterUserId <= 0)
+            return "-";
+
+        if (_userById.TryGetValue(requesterUserId, out var u))
+        {
+            if (u.IsActive.HasValue && u.IsActive.Value == false)
+                return $"{u.Name} {L["InactiveSuffix"]}";
+
+            return u.Name;
+        }
+
+        return requesterUserId.ToString();
+    }
+
+    private string GetCategoryName(int? categoryId)
+    {
+        if (!categoryId.HasValue || categoryId.Value <= 0)
+            return "-";
+
+        if (_categoryById.TryGetValue(categoryId.Value, out var name) && !string.IsNullOrWhiteSpace(name))
+            return name;
+
+        return categoryId.Value.ToString();
+    }
+
+    private string ImpactText(byte? impact)
+    {
+        if (!impact.HasValue)
+            return "-";
+
+        return impact.Value switch
+        {
+            0 => L["Impact_Info"],
+            1 => L["Impact_Low"],
+            2 => L["Impact_Medium"],
+            3 => L["Impact_High"],
+            4 => L["Impact_Critical"],
+            _ => impact.Value.ToString()
+        };
+    }
+
+    private string UrgencyText(byte? urgency)
+    {
+        if (!urgency.HasValue)
+            return "-";
+
+        return urgency.Value switch
+        {
+            1 => L["Urgency_Low"],
+            2 => L["Urgency_Medium"],
+            3 => L["Urgency_High"],
+            4 => L["Urgency_Critical"],
+            _ => urgency.Value.ToString()
+        };
+    }
+
+    private static int ImpactWeight(byte? impact)
+    {
+        if (!impact.HasValue) return 0;
+
+        return impact.Value switch
+        {
+            0 => 1,
+            1 => 3,
+            2 => 6,
+            3 => 9,
+            4 => 12,
+            _ => 0
+        };
+    }
+
+    private static int UrgencyWeight(byte? urgency)
+    {
+        if (!urgency.HasValue) return 0;
+
+        return urgency.Value switch
+        {
+            1 => 2,
+            2 => 4,
+            3 => 6,
+            4 => 10,
+            _ => 0
+        };
+    }
+
+    private static string MapPriorityTag(int score) =>
+        score >= 100 ? "Emergency" :
+        score >= 70 ? "Very High" :
+        score >= 40 ? "High" :
+        score >= 15 ? "Medium" :
+        score >= 1 ? "Low" :
+                     "-";
+
+    private static Color MapPriorityColor(string tag) => (tag ?? string.Empty).Trim() switch
+    {
+        "Emergency" => Color.Error,
+        "Very High" => Color.Error,
+        "High" => Color.Warning,
+        "Medium" => Color.Info,
+        "Low" => Color.Success,
+        _ => Color.Default
+    };
+
+    private (string Text, Color Color) PriorityFor(ScheduledTicketDefinitionDto def)
+    {
+        var score = ImpactWeight(def.Impact) * UrgencyWeight(def.Urgency);
+        if (score <= 0)
+            return ("-", Color.Default);
+
+        var clamped = Math.Max(1, Math.Min(120, score));
+        var tag = MapPriorityTag(score);
+        return ($"{tag} ({clamped})", MapPriorityColor(tag));
+    }
+
+    private string GetRowClass(ScheduledTicketDefinitionDto item, int rowNumber)
+    {
+        _ = item;
+        _ = rowNumber;
+        return "scheduler-row";
+    }
+
+    private string GetRunRowClass(TicketSchedulerRunDto item, int rowNumber)
+    {
+        _ = item;
+        _ = rowNumber;
+        return "scheduler-run-row";
+    }
+
+    private async Task OnDefinitionRowClick(DataGridRowClickEventArgs<ScheduledTicketDefinitionDto> args)
+    {
+        if (_loading)
+            return;
+
+        if (args.Item is null)
+            return;
+
+        await EditDefinitionAsync(args.Item.DefinitionId);
+    }
+
+    private async Task NewDefinitionAsync()
+    {
+        if (_loading)
+            return;
+
+        var nowUtc = DateTime.UtcNow;
+        var nowLocal = SchedulingRepo.ToPlantLocalTime(nowUtc);
+
+        var model = new ScheduledTicketDefinitionDto
+        {
+            DefinitionId = 0,
+            Name = L["Default_NewDefinitionName"],
+            IsEnabled = true,
+
+            TitleTemplate = L["Default_TitleTemplate"],
+            DescriptionTemplate = L["Default_DescriptionTemplate"],
+
+            RequesterUserId = _currentUserId,
+
+            ScheduleIsEnabled = true,
+            ScheduleTimeZoneId = TimeZoneInfo.Local.Id,
+            ScheduleStartAtUtc = nowUtc.AddMinutes(-1),
+            ScheduleEndAtUtc = null,
+            ScheduleAtTime = new TimeSpan(nowLocal.Hour, nowLocal.Minute, 0),
+
+            ScheduleFrequencyType = 1,
+            ScheduleIntervalValue = 1,
+
+            ScheduleDaysOfWeekMask = null,
+            ScheduleDayOfMonth = null,
+            ScheduleMonthOfYear = null,
+
+            ScheduleSkipWeekends = false,
+            ScheduleMoveToNextBusinessDay = false
+        };
+
+        await OpenDefinitionEditorAsync(model);
+    }
+
+    private async Task EditDefinitionAsync(int definitionId)
+    {
+        if (_loading)
+            return;
+
+        var fresh = await DefinitionsService.GetDefinitionAsync(definitionId);
+        if (fresh is null)
+        {
+            Snackbar.Add(L["Msg_DefinitionNotFound"], Severity.Warning);
+            return;
+        }
+
+        await OpenDefinitionEditorAsync(fresh);
+    }
+
+    private async Task OpenDefinitionEditorAsync(ScheduledTicketDefinitionDto model)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Model"] = model,
+            ["ActorUserId"] = _currentUserId
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            FullWidth = true,
+            MaxWidth = MaxWidth.Medium
+        };
+
+        var dialog = DialogService.Show<DefinitionEditDialog>(L["Dialog_Definition"], parameters, options);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+            await ReloadAllAsync();
+    }
+
+    private string ResultText(byte code) => code switch
+    {
+        0 => L["Result_Created"],
+        1 => L["Result_Skipped"],
+        2 => L["Result_Disabled"],
+        3 => L["Result_NoOp"],
+        4 => L["Result_Failed"],
+        _ => L["Result_Other"]
+    };
+
+    private static Color ResultColor(byte code) => code switch
+    {
+        0 => Color.Success,
+        1 => Color.Info,
+        2 => Color.Warning,
+        4 => Color.Error,
+        _ => Color.Secondary
+    };
+}

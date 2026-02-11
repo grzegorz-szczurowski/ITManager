@@ -1,0 +1,1773 @@
+﻿@page "/projects/{Id:int}"
+@rendermode InteractiveServer
+
+@* File: Components/Pages/Projects/ProjectDetails.razor
+   Description: Project details + tickets. Create/Edit w tym samym ekranie. UI w stylu TicketEdit.
+   Version: 1.45
+   Created: 2026-01-25
+   Updated:
+   - 2026-01-28 - Tickets: dodane przyciski "Dodaj" i "Powiąż" nad listą + modal powiązania ticketów.
+   - 2026-01-28 - CHANGE: usunięto wyświetlanie priorytetu projektu; scoring to prosty wynik (classic: (I*U)+S+D-E) pokazany jako liczba.
+   - 2026-01-28 - UX: po zapisie wraca do ProjectsIndex; usunięto przycisk Back.
+   - 2026-01-28 - FIX: Cancel zawsze wraca do ProjectsIndex.
+   - 2026-01-28 - UX: dodano krótkie pytania + przykłady przy polach scoringu i kluczowych toggle, aby ujednolicić wybór.
+   - 2026-01-29 - i18n: literals moved to resx (PL/EN) via IStringLocalizer<ProjectDetails>.
+   - 2026-01-29 - FIX: Scope toggle read-only: poprawione domknięcia MudTooltip/MudToggleItem (Razor parse errors).
+   - 2026-01-29 - FIX: opisy scoringu zawsze odświeżają się po zmianie toggle (ValueChanged + StateHasChanged + @key).
+   Notes:
+   - Backend: wymagane metody ProjectsService do pobrania ticketów kandydujących i zapisania powiązań.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using ITManager.Models.Projects
+@using ITManager.Services.Projects
+@using ITManager.Services.Auth
+
+@inject ProjectsService ProjectsService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+@inject IDialogService DialogService
+@inject IStringLocalizer<ProjectDetails> L
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    @if (_isCreateMode && !_canCreate)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+            @L["NoCreatePermission"]
+        </MudAlert>
+    }
+    else if (!_isCreateMode && _loadAttempted && _project == null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+            @L["ProjectNotFoundOrNoAccess"]
+        </MudAlert>
+    }
+    else
+    {
+        <div class="project-content-container">
+
+            <MudStack Spacing="2">
+
+                @* HEADER *@
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+                    <MudStack Spacing="0" AlignItems="AlignItems.Start">
+                        <MudText Typo="Typo.h5">
+                            @GetHeaderTitle()
+                        </MudText>
+
+                        @if (_isCreateMode)
+                        {
+                            <MudText Typo="Typo.subtitle2" Style="opacity:0.75;">
+                                @L["CreateMode"]
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @L["ProjectsLabel"]
+                            </MudText>
+                        }
+                    </MudStack>
+
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+
+                        @if (!_isCreateMode && _project != null && _canEdit && !_isEditMode)
+                        {
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Edit"
+                                       Disabled="@(_saving || _loading)"
+                                       OnClick="EnterEditMode">
+                                @L["EditButton"]
+                            </MudButton>
+                        }
+
+                        @if (!_isCreateMode && _project != null)
+                        {
+                            <MudText Typo="Typo.subtitle1" Style="opacity:0.85; font-weight:600;">
+                                #@Id
+                            </MudText>
+                        }
+
+                    </MudStack>
+
+                </MudStack>
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                @if (!_isCreateMode && _project == null)
+                {
+                    <MudText Typo="Typo.body2" Style="opacity:0.75;">
+                        @L["Loading"]
+                    </MudText>
+                }
+                else
+                {
+                    <MudGrid GutterSize="3">
+
+                        @* LEFT *@
+                        <MudItem xs="12" md="4">
+                            <MudPaper Elevation="0" Outlined="true" Class="pa-3">
+                                <MudStack Spacing="2">
+
+                                    @* STATUS *@
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@L["StatusTitle"]</MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-question">
+                                            @L["StatusQuestion"]
+                                        </MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-example">
+                                            @GetStatusExampleLine()
+                                        </MudText>
+
+                                        @if (HasStatuses)
+                                        {
+                                            @if (_isEditMode || _isCreateMode)
+                                            {
+                                                <MudToggleGroup T="int"
+                                                                Exclusive="true"
+                                                                @bind-Value="_model.ProjectStatusId"
+                                                                @bind-Value:after="OnProjectStatusChangedAfter"
+                                                                Disabled="@(_saving || _loading)"
+                                                                Class="segmented-toggle segmented-toggle-sm"
+                                                                FullWidth="true">
+                                                    @foreach (var it in _lookups!.Statuses)
+                                                    {
+                                                        <MudToggleItem Value="@it.Id">
+                                                            <MudTooltip Text="@it.Name">
+                                                                <span>@it.Name</span>
+                                                            </MudTooltip>
+                                                        </MudToggleItem>
+                                                    }
+                                                </MudToggleGroup>
+                                            }
+                                            else
+                                            {
+                                                <MudToggleGroup T="int"
+                                                                Exclusive="true"
+                                                                Value="@_project!.ProjectStatusId"
+                                                                Disabled="true"
+                                                                Class="segmented-toggle segmented-toggle-sm"
+                                                                FullWidth="true">
+                                                    @foreach (var it in _lookups!.Statuses)
+                                                    {
+                                                        <MudToggleItem Value="@it.Id">
+                                                            <MudTooltip Text="@it.Name">
+                                                                <span>@it.Name</span>
+                                                            </MudTooltip>
+                                                        </MudToggleItem>
+                                                    }
+                                                </MudToggleGroup>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            @if (_isEditMode || _isCreateMode)
+                                            {
+                                                <MudNumericField T="int"
+                                                                 @bind-Value="_model.ProjectStatusId"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Disabled="@(_saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                            else
+                                            {
+                                                <MudChip T="string" Label="true" Variant="Variant.Outlined">
+                                                    @_project!.ProjectStatusName
+                                                </MudChip>
+                                            }
+                                        }
+
+                                        <MudText Typo="Typo.caption" Style="opacity:0.75;">
+                                            @string.Format(L["StageFormat"], _stageDisplay)
+                                        </MudText>
+                                    </MudStack>
+
+                                    <MudDivider />
+
+                                    @* SCORING *@
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@L["ScoringTitle"]</MudText>
+
+                                        <MudText Typo="Typo.caption" Style="opacity:0.80;">
+                                            @L["ScoringGoal"]
+                                        </MudText>
+
+                                        <MudChip T="string" Label="true" Variant="Variant.Outlined">
+                                            @string.Format(L["ScoreFormat"], GetScorePreview())
+                                        </MudChip>
+
+                                        @* Impact *@
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.8;">@L["ImpactTitle"]</MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-question">
+                                                @L["ImpactQuestion"]
+                                            </MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-example" @key="_model.Impact">
+                                                @GetImpactExample()
+                                            </MudText>
+
+                                            @if (HasImpacts)
+                                            {
+                                                @if (_isEditMode || _isCreateMode)
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_model.Impact"
+                                                                    ValueChanged="OnImpactChanged"
+                                                                    Disabled="@(_saving || _loading)"
+                                                                    Class="segmented-toggle"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Impacts)
+                                                        {
+                                                            var css = GetScoreToggleClass(it, "Impact");
+                                                            <MudToggleItem Value="@it.Id" Class="@css">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                                else
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_project!.Impact"
+                                                                    Disabled="true"
+                                                                    Class="segmented-toggle"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Impacts)
+                                                        {
+                                                            var css = GetScoreToggleClass(it, "Impact");
+                                                            <MudToggleItem Value="@it.Id" Class="@css">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 Label="@L["ImpactNumericLabel"]"
+                                                                 @bind-Value="_model.Impact"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Max="5"
+                                                                 Disabled="@(!(_isEditMode || _isCreateMode) || _saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        </MudStack>
+
+                                        @* Urgency *@
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.8;">@L["UrgencyTitle"]</MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-question">
+                                                @L["UrgencyQuestion"]
+                                            </MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-example" @key="_model.Urgency">
+                                                @GetUrgencyExample()
+                                            </MudText>
+
+                                            @if (HasUrgencies)
+                                            {
+                                                @if (_isEditMode || _isCreateMode)
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_model.Urgency"
+                                                                    ValueChanged="OnUrgencyChanged"
+                                                                    Disabled="@(_saving || _loading)"
+                                                                    Class="segmented-toggle"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Urgencies)
+                                                        {
+                                                            var css = GetScoreToggleClass(it, "Urgency");
+                                                            <MudToggleItem Value="@it.Id" Class="@css">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                                else
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_project!.Urgency"
+                                                                    Disabled="true"
+                                                                    Class="segmented-toggle"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Urgencies)
+                                                        {
+                                                            var css = GetScoreToggleClass(it, "Urgency");
+                                                            <MudToggleItem Value="@it.Id" Class="@css">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 Label="@L["UrgencyNumericLabel"]"
+                                                                 @bind-Value="_model.Urgency"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Max="5"
+                                                                 Disabled="@(!(_isEditMode || _isCreateMode) || _saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        </MudStack>
+
+                                        @* Scope *@
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.8;">@L["ScopeTitle"]</MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-question">
+                                                @L["ScopeQuestion"]
+                                            </MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-example" @key="_model.Scope">
+                                                @GetScopeExample()
+                                            </MudText>
+
+                                            @if (HasScopes)
+                                            {
+                                                @if (_isEditMode || _isCreateMode)
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_model.Scope"
+                                                                    ValueChanged="OnScopeChanged"
+                                                                    Disabled="@(_saving || _loading)"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Scopes)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                                else
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_project!.Scope"
+                                                                    Disabled="true"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Scopes)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 Label="@L["ScopeNumericLabel"]"
+                                                                 @bind-Value="_model.Scope"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Max="3"
+                                                                 Disabled="@(!(_isEditMode || _isCreateMode) || _saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        </MudStack>
+
+                                        @* Delay *@
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.8;">@L["DelayTitle"]</MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-question">
+                                                @L["DelayQuestion"]
+                                            </MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-example" @key="_model.CostOfDelay">
+                                                @GetDelayExample()
+                                            </MudText>
+
+                                            @if (HasDelayCosts)
+                                            {
+                                                @if (_isEditMode || _isCreateMode)
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_model.CostOfDelay"
+                                                                    ValueChanged="OnDelayChanged"
+                                                                    Disabled="@(_saving || _loading)"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.DelayCosts)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                                else
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_project!.CostOfDelay"
+                                                                    Disabled="true"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.DelayCosts)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 Label="@L["DelayNumericLabel"]"
+                                                                 @bind-Value="_model.CostOfDelay"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Max="3"
+                                                                 Disabled="@(!(_isEditMode || _isCreateMode) || _saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        </MudStack>
+
+                                        @* Effort *@
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.8;">@L["EffortTitle"]</MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-question">
+                                                @L["EffortQuestion"]
+                                            </MudText>
+
+                                            <MudText Typo="Typo.caption" Class="helper-example" @key="_model.Effort">
+                                                @GetEffortExample()
+                                            </MudText>
+
+                                            @if (HasEfforts)
+                                            {
+                                                @if (_isEditMode || _isCreateMode)
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_model.Effort"
+                                                                    ValueChanged="OnEffortChanged"
+                                                                    Disabled="@(_saving || _loading)"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Efforts)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                                else
+                                                {
+                                                    <MudToggleGroup T="int"
+                                                                    Exclusive="true"
+                                                                    Value="@_project!.Effort"
+                                                                    Disabled="true"
+                                                                    Class="segmented-toggle segmented-toggle-sm"
+                                                                    FullWidth="true">
+                                                        @foreach (var it in _lookups!.Efforts)
+                                                        {
+                                                            <MudToggleItem Value="@it.Id">
+                                                                <MudTooltip Text="@it.Name">
+                                                                    <span>@it.Name</span>
+                                                                </MudTooltip>
+                                                            </MudToggleItem>
+                                                        }
+                                                    </MudToggleGroup>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 Label="@L["EffortNumericLabel"]"
+                                                                 @bind-Value="_model.Effort"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Max="3"
+                                                                 Disabled="@(!(_isEditMode || _isCreateMode) || _saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        </MudStack>
+                                    </MudStack>
+
+                                    <MudDivider />
+
+                                    @* OWNER *@
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@L["BusinessOwnerTitle"]</MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-question">
+                                            @L["OwnerQuestion"]
+                                        </MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-example">
+                                            @L["OwnerExample"]
+                                        </MudText>
+
+                                        @if (_isEditMode || _isCreateMode)
+                                        {
+                                            @if (HasOwners)
+                                            {
+                                                <MudSelect T="int"
+                                                           Label="@L["OwnerLabel"]"
+                                                           @bind-Value="_model.OwnerUserId"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Dense="true"
+                                                           Disabled="@(_saving || _loading)"
+                                                           FullWidth="true">
+                                                    @foreach (var it in _lookups!.Owners)
+                                                    {
+                                                        <MudSelectItem T="int" Value="@it.Id">@it.Name</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            }
+                                            else
+                                            {
+                                                <MudNumericField T="int"
+                                                                 @bind-Value="_model.OwnerUserId"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense"
+                                                                 Min="1"
+                                                                 Disabled="@(_saving || _loading)"
+                                                                 FullWidth="true" />
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Label="true" Variant="Variant.Outlined">
+                                                @_project!.OwnerDisplayName
+                                            </MudChip>
+                                        }
+                                    </MudStack>
+
+                                    <MudDivider />
+
+                                    @* Dates *@
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@L["DatesTitle"]</MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-question">
+                                            @L["DatesQuestion"]
+                                        </MudText>
+
+                                        <MudText Typo="Typo.caption" Class="helper-example">
+                                            @L["DatesExample"]
+                                        </MudText>
+
+                                        @if (_isEditMode || _isCreateMode)
+                                        {
+                                            <MudDatePicker @bind-Date="_model.PlannedStartDate"
+                                                           Label="@L["PlannedStartLabel"]"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Disabled="@(_saving || _loading)" />
+
+                                            <MudDatePicker @bind-Date="_model.DeadlineDate"
+                                                           Label="@L["DeadlineLabel"]"
+                                                           Variant="Variant.Outlined"
+                                                           Margin="Margin.Dense"
+                                                           Disabled="@(_saving || _loading)" />
+                                        }
+                                        else
+                                        {
+                                            <MudStack Row="true" Spacing="1" Style="flex-wrap:wrap;">
+                                                @if (_project!.PlannedStartDate.HasValue)
+                                                {
+                                                    <MudChip T="string" Label="true" Variant="Variant.Outlined">
+                                                        @string.Format(L["StartDateFormat"], _project.PlannedStartDate.Value.ToString("yyyy-MM-dd"))
+                                                    </MudChip>
+                                                }
+                                                @if (_project.DeadlineDate.HasValue)
+                                                {
+                                                    <MudChip T="string" Label="true" Variant="Variant.Outlined">
+                                                        @string.Format(L["DeadlineDateFormat"], _project.DeadlineDate.Value.ToString("yyyy-MM-dd"))
+                                                    </MudChip>
+                                                }
+                                            </MudStack>
+                                        }
+                                    </MudStack>
+
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+
+                        @* RIGHT *@
+                        <MudItem xs="12" md="8">
+                            <MudPaper Elevation="0" Outlined="true" Class="pa-3">
+                                <MudStack Spacing="2">
+
+                                    <MudTextField T="string"
+                                                  Label="@L["NameLabel"]"
+                                                  @bind-Value="_model.Name"
+                                                  Variant="Variant.Outlined"
+                                                  FullWidth="true"
+                                                  Dense="true"
+                                                  Disabled="@(!(_isCreateMode || _isEditMode) || _saving || _loading)"
+                                                  Required="true" />
+
+                                    <MudTextField T="string"
+                                                  Label="@L["DescriptionLabel"]"
+                                                  @bind-Value="_model.Description"
+                                                  Variant="Variant.Outlined"
+                                                  FullWidth="true"
+                                                  Dense="true"
+                                                  Lines="5"
+                                                  Disabled="@(!(_isCreateMode || _isEditMode) || _saving || _loading)" />
+
+                                    @* LastUpdateNote *@
+                                    @if ((_isCreateMode || _isEditMode) && _requiresLastUpdateNote)
+                                    {
+                                        <MudTextField T="string"
+                                                      Label="@L["LastUpdateNoteLabel"]"
+                                                      @bind-Value="_model.LastUpdateNote"
+                                                      Variant="Variant.Outlined"
+                                                      FullWidth="true"
+                                                      Dense="true"
+                                                      Lines="3"
+                                                      Required="true"
+                                                      Disabled="@(_saving || _loading)" />
+
+                                        <MudText Typo="Typo.caption" Style="opacity:0.75;">
+                                            @L["LastUpdateNoteRequiredHint"]
+                                        </MudText>
+                                    }
+
+                                    <MudDivider />
+
+                                    @* Tickets *@
+                                    <MudStack Spacing="2">
+
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                            <MudText Typo="Typo.subtitle2">@L["TicketsTitle"]</MudText>
+
+                                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                                <MudButton Variant="Variant.Filled"
+                                                           Color="Color.Primary"
+                                                           StartIcon="@Icons.Material.Filled.Add"
+                                                           Disabled="@(!CanManageProjectTickets())"
+                                                           OnClick="AddNewTicketAsync">
+                                                    @L["AddButton"]
+                                                </MudButton>
+
+                                                <MudButton Variant="Variant.Outlined"
+                                                           Color="Color.Primary"
+                                                           StartIcon="@Icons.Material.Filled.Link"
+                                                           Disabled="@(!CanManageProjectTickets())"
+                                                           OnClick="OpenLinkTicketsDialogAsync">
+                                                    @L["LinkButton"]
+                                                </MudButton>
+
+                                                <MudTextField T="string"
+                                                              Value="@_ticketsSearch"
+                                                              ValueChanged="OnTicketsSearchChanged"
+                                                              ValueChangedDebounceInterval="300"
+                                                              Adornment="Adornment.Start"
+                                                              AdornmentIcon="@Icons.Material.Filled.Search"
+                                                              Placeholder="@L["SearchTicketsPlaceholder"]"
+                                                              Immediate="true"
+                                                              Dense="true"
+                                                              Disabled="@(_saving || _loading)"
+                                                              Class="tickets-search" />
+                                            </MudStack>
+                                        </MudStack>
+
+                                        <MudDataGrid T="ProjectTicketListItemDto"
+                                                     Items="@FilteredTickets"
+                                                     Dense="true"
+                                                     Hover="true"
+                                                     Elevation="0"
+                                                     Outlined="true"
+                                                     Bordered="true"
+                                                     Filterable="false"
+                                                     SortMode="SortMode.Multiple"
+                                                     RowClick="OnTicketRowClick"
+                                                     RowClassFunc="TicketRowClass"
+                                                     Height="calc(100vh - 520px)">
+
+                                            <Columns>
+                                                <PropertyColumn Property="x => x.TicketId"
+                                                                Title="@L["TicketsColId"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-id" />
+
+                                                <PropertyColumn Property="x => x.Title"
+                                                                Title="@L["TicketsColTitle"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-title" />
+
+                                                <PropertyColumn Property="x => x.StatusName"
+                                                                Title="@L["TicketsColStatus"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-status" />
+
+                                                <PropertyColumn Property="x => x.PriorityName"
+                                                                Title="@L["TicketsColPriority"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-priority" />
+
+                                                <PropertyColumn Property="x => x.AssignedToDisplayName"
+                                                                Title="@L["TicketsColAssigned"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-assigned" />
+
+                                                <PropertyColumn Property="x => x.UpdatedAtUtc"
+                                                                Title="@L["TicketsColUpdated"]"
+                                                                Sortable="true"
+                                                                CellClass="tickets-col-updated" />
+                                            </Columns>
+
+                                            <PagerContent>
+                                                <MudDataGridPager T="ProjectTicketListItemDto" />
+                                            </PagerContent>
+
+                                            <NoRecordsContent>
+                                                <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                                    @L["NoTickets"]
+                                                </MudText>
+                                            </NoRecordsContent>
+
+                                        </MudDataGrid>
+
+                                    </MudStack>
+
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+
+                    </MudGrid>
+
+                    @* FOOTER ACTIONS *@
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="mt-2">
+
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   Class="ml-2"
+                                   Disabled="@(!CanSave())"
+                                   OnClick="SaveAsync">
+                            @L["SaveButton"]
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Close"
+                                   Disabled="@(_saving || _loading)"
+                                   OnClick="Cancel">
+                            @L["CancelButton"]
+                        </MudButton>
+
+                    </MudStack>
+                }
+
+            </MudStack>
+
+            <MudOverlay Visible="@(_loading || _saving)"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Absolute="true"
+                        Class="project-overlay">
+                <MudPaper Class="pa-6 project-overlay-card">
+                    <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1">
+                            @(_saving? L["Saving"] : L["Loading"])
+                        </MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudOverlay>
+
+        </div>
+    }
+
+</MudPaper>
+
+<style>
+    :root {
+        --tg-neutral-border: var(--mud-palette-lines-default, rgba(255,255,255,0.20));
+        --tg-neutral-sep: var(--mud-palette-lines-default, rgba(255,255,255,0.18));
+    }
+
+    .project-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .project-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .project-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .tickets-search {
+        min-width: 400px;
+    }
+
+    .tickets-row-clickable {
+        cursor: pointer;
+    }
+
+    .tickets-col-id {
+        width: 90px;
+        white-space: nowrap;
+    }
+
+    .tickets-col-status {
+        width: 140px;
+        white-space: nowrap;
+    }
+
+    .tickets-col-priority {
+        width: 140px;
+        white-space: nowrap;
+    }
+
+    .tickets-col-assigned {
+        width: 220px;
+    }
+
+    .tickets-col-updated {
+        width: 170px;
+        white-space: nowrap;
+    }
+
+    .tickets-col-title {
+        min-width: 260px;
+    }
+
+    .segmented-toggle {
+        width: 100%;
+    }
+
+        .segmented-toggle .mud-toggle-group {
+            width: 100%;
+        }
+
+        .segmented-toggle .mud-toggle-item {
+            flex: 1 1 auto;
+            text-align: center;
+            min-height: 40px;
+            cursor: help;
+        }
+
+    .segmented-toggle-sm .mud-toggle-item {
+        min-height: 34px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
+    .segmented-toggle .mud-toggle-group.mud-toggle-group-outlined,
+    .segmented-toggle-sm .mud-toggle-group.mud-toggle-group-outlined {
+        border-color: var(--tg-neutral-border) !important;
+    }
+
+        .segmented-toggle .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item,
+        .segmented-toggle-sm .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item {
+            border-color: var(--tg-neutral-border) !important;
+        }
+
+            .segmented-toggle .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item:not(:last-child),
+            .segmented-toggle-sm .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item:not(:last-child) {
+                border-right-color: var(--tg-neutral-sep) !important;
+            }
+
+            .segmented-toggle .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item + .mud-toggle-item,
+            .segmented-toggle-sm .mud-toggle-group.mud-toggle-group-outlined .mud-toggle-item + .mud-toggle-item {
+                border-left-color: var(--tg-neutral-sep) !important;
+            }
+
+    .mud-toggle-group .mud-toggle-item.tg-critical:not(.mud-selected):not(.mud-toggle-item-selected),
+    .mud-toggle-group .mud-toggle-item.tg-critical:not(.mud-selected):not(.mud-toggle-item-selected) .mud-button-root {
+        background-color: rgba(211,47,47,0.15) !important;
+        border-color: var(--tg-neutral-border) !important;
+        color: var(--mud-palette-text-primary) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-high:not(.mud-selected):not(.mud-toggle-item-selected),
+    .mud-toggle-group .mud-toggle-item.tg-high:not(.mud-selected):not(.mud-toggle-item-selected) .mud-button-root {
+        background-color: rgba(245,124,0,0.15) !important;
+        border-color: var(--tg-neutral-border) !important;
+        color: var(--mud-palette-text-primary) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-medium:not(.mud-selected):not(.mud-toggle-item-selected),
+    .mud-toggle-group .mud-toggle-item.tg-medium:not(.mud-selected):not(.mud-toggle-item-selected) .mud-button-root {
+        background-color: rgba(249,168,37,0.15) !important;
+        border-color: var(--tg-neutral-border) !important;
+        color: var(--mud-palette-text-primary) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-low:not(.mud-selected):not(.mud-toggle-item-selected),
+    .mud-toggle-group .mud-toggle-item.tg-low:not(.mud-selected):not(.mud-toggle-item-selected) .mud-button-root {
+        background-color: rgba(46,125,50,0.15) !important;
+        border-color: var(--tg-neutral-border) !important;
+        color: var(--mud-palette-text-primary) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-critical.mud-selected,
+    .mud-toggle-group .mud-toggle-item.tg-critical.mud-toggle-item-selected,
+    .mud-toggle-group .mud-toggle-item.tg-critical.mud-selected .mud-button-root,
+    .mud-toggle-group .mud-toggle-item.tg-critical.mud-toggle-item-selected .mud-button-root {
+        background-color: #D32F2F !important;
+        color: #FFFFFF !important;
+        border-color: var(--tg-neutral-border) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-high.mud-selected,
+    .mud-toggle-group .mud-toggle-item.tg-high.mud-toggle-item-selected,
+    .mud-toggle-group .mud-toggle-item.tg-high.mud-selected .mud-button-root,
+    .mud-toggle-group .mud-toggle-item.tg-high.mud-toggle-item-selected .mud-button-root {
+        background-color: #F57C00 !important;
+        color: #FFFFFF !important;
+        border-color: var(--tg-neutral-border) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-medium.mud-selected,
+    .mud-toggle-group .mud-toggle-item.tg-medium.mud-toggle-item-selected,
+    .mud-toggle-group .mud-toggle-item.tg-medium.mud-selected .mud-button-root,
+    .mud-toggle-group .mud-toggle-item.tg-medium.mud-toggle-item-selected .mud-button-root {
+        background-color: #F9A825 !important;
+        color: #FFFFFF !important;
+        border-color: var(--tg-neutral-border) !important;
+    }
+
+    .mud-toggle-group .mud-toggle-item.tg-low.mud-selected,
+    .mud-toggle-group .mud-toggle-item.tg-low.mud-selected .mud-button-root,
+    .mud-toggle-group .mud-toggle-item.tg-low.mud-toggle-item-selected,
+    .mud-toggle-group .mud-toggle-item.tg-low.mud-toggle-item-selected .mud-button-root {
+        background-color: #2E7D32 !important;
+        color: #FFFFFF !important;
+        border-color: var(--tg-neutral-border) !important;
+    }
+
+    .helper-question {
+        opacity: 0.80;
+        line-height: 1.25;
+    }
+
+    .helper-example {
+        opacity: 0.86;
+        line-height: 1.25;
+        min-height: 34px;
+    }
+</style>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private const string PermProjectsCreate = "Projects.Create";
+    private const string PermProjectsEdit = "Projects.Edit";
+    private const string PermTicketsCreate = "Tickets.Create";
+
+    private bool _loading;
+    private bool _saving;
+
+    private bool _loadAttempted;
+
+    private bool _isCreateMode;
+    private bool _isEditMode;
+
+    private bool _canCreate;
+    private bool _canEdit;
+    private bool _canCreateTicket;
+
+    private string _loadError = string.Empty;
+
+    private ProjectDetailsDto? _project;
+    private ProjectUpsertRequest _model = new();
+
+    private ProjectFormLookupsDto? _lookups;
+
+    private string _ticketsSearch = string.Empty;
+
+    private ProjectBusinessStage _stage = ProjectBusinessStage.Draft;
+    private string _stageDisplay = "Draft";
+    private bool _requiresLastUpdateNote;
+
+    private bool HasStatuses => _lookups?.Statuses?.Any() == true;
+    private bool HasOwners => _lookups?.Owners?.Any() == true;
+
+    private bool HasImpacts => _lookups?.Impacts?.Any() == true;
+    private bool HasUrgencies => _lookups?.Urgencies?.Any() == true;
+    private bool HasScopes => _lookups?.Scopes?.Any() == true;
+    private bool HasDelayCosts => _lookups?.DelayCosts?.Any() == true;
+    private bool HasEfforts => _lookups?.Efforts?.Any() == true;
+
+    private IEnumerable<ProjectTicketListItemDto> FilteredTickets
+        => (_project?.Tickets ?? Enumerable.Empty<ProjectTicketListItemDto>())
+            .Where(x => TicketMatchesSearch(x, _ticketsSearch))
+            .ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _loadAttempted = false;
+        _loadError = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+
+            _isCreateMode = Id == 0;
+
+            _canCreate = CurrentUserContextService.Can(PermProjectsCreate);
+            _canEdit = CurrentUserContextService.Can(PermProjectsEdit);
+            _canCreateTicket = CurrentUserContextService.Can(PermTicketsCreate);
+
+            _isEditMode = false;
+            _project = null;
+            _ticketsSearch = string.Empty;
+
+            await LoadLookupsAsync();
+
+            if (_isCreateMode)
+            {
+                _model = CreateDefaultModel();
+                RefreshStageState();
+                _loadAttempted = true;
+                return;
+            }
+
+            await LoadAsync();
+            RefreshStageState();
+            _loadAttempted = true;
+        }
+        catch (Exception ex)
+        {
+            _project = null;
+            _loadError = ex.Message;
+            _loadAttempted = true;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private bool CanManageProjectTickets()
+    {
+        if (_saving || _loading)
+            return false;
+
+        if (_isCreateMode)
+            return false;
+
+        if (_project == null)
+            return false;
+
+        return _canEdit;
+    }
+
+    private async Task AddNewTicketAsync()
+    {
+        if (!CanManageProjectTickets())
+            return;
+
+        if (!_canCreateTicket)
+        {
+            Snackbar.Add(L["NoPermissions"], Severity.Error);
+            return;
+        }
+
+        Snackbar.Add(L["AddTicketNotReadyInfo"], Severity.Info);
+        Navigation.NavigateTo($"/tickets/0?projectId={Id}");
+        await Task.CompletedTask;
+    }
+
+    private async Task OpenLinkTicketsDialogAsync()
+    {
+        if (!CanManageProjectTickets())
+            return;
+
+        var parameters = new DialogParameters
+        {
+            { nameof(ProjectTicketLinkDialog.ProjectId), Id }
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            BackdropClick = false,
+            CloseOnEscapeKey = false
+        };
+
+        var dialog = DialogService.Show<ProjectTicketLinkDialog>(L["LinkTicketsDialogTitle"], parameters, options);
+        var result = await dialog.Result;
+
+        if (result.Canceled)
+            return;
+
+        await ReloadProjectAfterTicketsChangeAsync();
+    }
+
+    private async Task ReloadProjectAfterTicketsChangeAsync()
+    {
+        if (_isCreateMode)
+            return;
+
+        _loading = true;
+        _loadAttempted = false;
+
+        try
+        {
+            await LoadAsync();
+            RefreshStageState();
+            _loadAttempted = true;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        try
+        {
+            _lookups = await ProjectsService.GetProjectFormLookupsAsync();
+            EnsureScoringFallbacksIfMissing(_lookups);
+        }
+        catch (Exception ex)
+        {
+            _lookups = BuildFallbackLookups();
+            Snackbar.Add(string.Format(L["LookupLoadFailedWarning"], ex.Message), Severity.Warning);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _loadError = string.Empty;
+
+            _project = await ProjectsService.GetProjectDetailsAsync(Id);
+
+            if (_project != null)
+                _model = MapToUpsertModel(_project);
+        }
+        catch (Exception ex)
+        {
+            _project = null;
+            _loadError = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private string GetHeaderTitle()
+    {
+        if (_isCreateMode)
+            return L["HeaderNewProject"];
+
+        if (_project == null)
+            return L["HeaderProject"];
+
+        var n = (_project.Name ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(n) ? L["HeaderProject"] : n;
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/projects");
+
+    private void EnterEditMode()
+    {
+        if (!_canEdit)
+        {
+            Snackbar.Add(L["NoPermissions"], Severity.Error);
+            return;
+        }
+
+        if (_project == null)
+            return;
+
+        _model = MapToUpsertModel(_project);
+        _isEditMode = true;
+        RefreshStageState();
+    }
+
+    private void Cancel()
+    {
+        if (_saving || _loading)
+            return;
+
+        GoBack();
+    }
+
+    private bool CanSave()
+    {
+        if (_saving || _loading)
+            return false;
+
+        if (_isCreateMode)
+            return _canCreate && ValidateClientRules();
+
+        if (_isEditMode)
+            return _canEdit && ValidateClientRules();
+
+        return false;
+    }
+
+    private bool ValidateClientRules()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Name))
+            return false;
+
+        if (_requiresLastUpdateNote && string.IsNullOrWhiteSpace(_model.LastUpdateNote))
+            return false;
+
+        return true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving || _loading)
+            return;
+
+        if (!CanSave())
+            return;
+
+        try
+        {
+            _saving = true;
+
+            NormalizeModel(_model);
+
+            if (_isCreateMode)
+            {
+                var _ = await ProjectsService.CreateProjectAsync(_model);
+                Snackbar.Add(L["ProjectCreatedSuccess"], Severity.Success);
+                GoBack();
+                return;
+            }
+
+            _model.Id = Id;
+            await ProjectsService.UpdateProjectAsync(_model);
+
+            Snackbar.Add(L["ProjectUpdatedSuccess"], Severity.Success);
+            GoBack();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(string.Format(L["SaveFailedError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void OnProjectStatusChangedAfter()
+        => RefreshStageState();
+
+    private void RefreshStageState()
+    {
+        var statusName = TryGetStatusNameById(_model.ProjectStatusId);
+        _stage = ProjectBusinessStageResolver.Resolve(statusName);
+        _stageDisplay = GetStageDisplayName(_stage);
+
+        _requiresLastUpdateNote = _stage == ProjectBusinessStage.Validation || _stage == ProjectBusinessStage.OnHold;
+
+        if (!_requiresLastUpdateNote)
+            _model.LastUpdateNote = null;
+    }
+
+    private string GetStageDisplayName(ProjectBusinessStage stage) => stage switch
+    {
+        ProjectBusinessStage.Draft => L["Stage_Draft"],
+        ProjectBusinessStage.Planning => L["Stage_Planning"],
+        ProjectBusinessStage.Execution => L["Stage_Execution"],
+        ProjectBusinessStage.Validation => L["Stage_Validation"],
+        ProjectBusinessStage.OnHold => L["Stage_OnHold"],
+        ProjectBusinessStage.Done => L["Stage_Done"],
+        _ => L["Stage_Unknown"]
+    };
+
+    private string? TryGetStatusNameById(int id)
+    {
+        if (_lookups?.Statuses == null || _lookups.Statuses.Count == 0)
+            return _project?.ProjectStatusName;
+
+        var it = _lookups.Statuses.FirstOrDefault(x => x.Id == id);
+        return it?.Name ?? _project?.ProjectStatusName;
+    }
+
+    private static bool TicketMatchesSearch(ProjectTicketListItemDto t, string search)
+    {
+        if (t == null)
+            return false;
+
+        var s = (search ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return true;
+
+        bool has(string? v) => !string.IsNullOrWhiteSpace(v) && v.Contains(s, StringComparison.OrdinalIgnoreCase);
+
+        if (t.TicketId.ToString().Contains(s, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return has(t.Title)
+            || has(t.StatusName)
+            || has(t.PriorityName)
+            || has(t.AssignedToDisplayName);
+    }
+
+    private Task OnTicketsSearchChanged(string value)
+    {
+        _ticketsSearch = value ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private string TicketRowClass(ProjectTicketListItemDto row, int index) => "tickets-row-clickable";
+
+    private void OnTicketRowClick(DataGridRowClickEventArgs<ProjectTicketListItemDto> args)
+    {
+        if (args?.Item == null)
+            return;
+
+        var id = args.Item.TicketId;
+        if (id <= 0)
+            return;
+
+        Navigation.NavigateTo($"/tickets/{id}");
+    }
+
+    private static ProjectUpsertRequest CreateDefaultModel()
+    {
+        return new ProjectUpsertRequest
+        {
+            Id = null,
+            Name = string.Empty,
+            Description = null,
+            ProjectStatusId = 1,
+            ProjectPriorityId = 1,
+            OwnerUserId = 0,
+            PlannedStartDate = null,
+            DeadlineDate = null,
+            IsActive = true,
+
+            Impact = 3,
+            Urgency = 3,
+            Scope = 2,
+            CostOfDelay = 2,
+            Effort = 2
+        };
+    }
+
+    private static ProjectUpsertRequest MapToUpsertModel(ProjectDetailsDto dto)
+    {
+        return new ProjectUpsertRequest
+        {
+            Id = dto.Id,
+            Name = dto.Name ?? string.Empty,
+            Description = dto.Description,
+            ProjectStatusId = dto.ProjectStatusId,
+            ProjectPriorityId = dto.ProjectPriorityId,
+            OwnerUserId = dto.OwnerUserId,
+            PlannedStartDate = dto.PlannedStartDate,
+            DeadlineDate = dto.DeadlineDate,
+            IsActive = dto.IsActive,
+
+            Impact = dto.Impact,
+            Urgency = dto.Urgency,
+            Scope = dto.Scope,
+            CostOfDelay = dto.CostOfDelay,
+            Effort = dto.Effort,
+
+            LastUpdateNote = dto.LastUpdateNote
+        };
+    }
+
+    private static void NormalizeModel(ProjectUpsertRequest model)
+    {
+        model.Name = (model.Name ?? string.Empty).Trim();
+
+        if (model.Description != null)
+        {
+            model.Description = model.Description.Trim();
+            if (model.Description.Length == 0)
+                model.Description = null;
+        }
+
+        if (model.LastUpdateNote != null)
+        {
+            model.LastUpdateNote = model.LastUpdateNote.Trim();
+            if (model.LastUpdateNote.Length == 0)
+                model.LastUpdateNote = null;
+        }
+
+        model.Impact = Clamp(model.Impact, 1, 5, 3);
+        model.Urgency = Clamp(model.Urgency, 1, 5, 3);
+        model.Scope = Clamp(model.Scope, 1, 3, 2);
+        model.CostOfDelay = Clamp(model.CostOfDelay, 1, 3, 2);
+        model.Effort = Clamp(model.Effort, 1, 3, 2);
+    }
+
+    private static int Clamp(int value, int min, int max, int fallback)
+    {
+        if (value < min) return fallback;
+        if (value > max) return fallback;
+        return value;
+    }
+
+    private string GetScorePreview()
+    {
+        var score = CalculateScore(_model.Impact, _model.Urgency, _model.Scope, _model.CostOfDelay, _model.Effort);
+        return score.ToString();
+    }
+
+    private static int CalculateScore(int impact, int urgency, int scope, int costOfDelay, int effort)
+    {
+        var i = ClampOrFallback(impact, 1, 5, 3);
+        var u = ClampOrFallback(urgency, 1, 5, 3);
+        var s = ClampOrFallback(scope, 1, 3, 2);
+        var d = ClampOrFallback(costOfDelay, 1, 3, 2);
+        var e = ClampOrFallback(effort, 1, 3, 2);
+
+        checked
+        {
+            return (i * u) + s + d - e;
+        }
+    }
+
+    private static int ClampOrFallback(int value, int min, int max, int fallback)
+    {
+        if (value < min) return fallback;
+        if (value > max) return fallback;
+        return value;
+    }
+
+    private static string GetScoreToggleClass(LookupItemDto it, string kind)
+    {
+        var name = (it?.Name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var n = name.ToLowerInvariant();
+
+        if (!string.Equals(kind, "Impact", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(kind, "Urgency", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        if (n.Contains("critical") || n.Contains("immediate"))
+            return "tg-critical";
+
+        if (n.Contains("very high") || n.Contains("asap"))
+            return "tg-high";
+
+        if (n.Contains("high"))
+            return "tg-high";
+
+        if (n.Contains("medium") || n.Contains("normal"))
+            return "tg-medium";
+
+        if (n.Contains("low"))
+            return "tg-low";
+
+        return string.Empty;
+    }
+
+    private static ProjectFormLookupsDto BuildFallbackLookups()
+    {
+        var dto = new ProjectFormLookupsDto();
+        EnsureScoringFallbacksIfMissing(dto);
+        return dto;
+    }
+
+    private static void EnsureScoringFallbacksIfMissing(ProjectFormLookupsDto dto)
+    {
+        if (dto.Impacts == null) dto.Impacts = new();
+        if (dto.Urgencies == null) dto.Urgencies = new();
+        if (dto.Scopes == null) dto.Scopes = new();
+        if (dto.DelayCosts == null) dto.DelayCosts = new();
+        if (dto.Efforts == null) dto.Efforts = new();
+
+        if (!dto.Impacts.Any())
+        {
+            dto.Impacts.AddRange(new[]
+            {
+                new LookupItemDto { Id = 1, Name = "Low" },
+                new LookupItemDto { Id = 2, Name = "Medium" },
+                new LookupItemDto { Id = 3, Name = "High" },
+                new LookupItemDto { Id = 4, Name = "Very high" },
+                new LookupItemDto { Id = 5, Name = "Critical" }
+            });
+        }
+
+        if (!dto.Urgencies.Any())
+        {
+            dto.Urgencies.AddRange(new[]
+            {
+                new LookupItemDto { Id = 1, Name = "Low" },
+                new LookupItemDto { Id = 2, Name = "Normal" },
+                new LookupItemDto { Id = 3, Name = "High" },
+                new LookupItemDto { Id = 4, Name = "ASAP" },
+                new LookupItemDto { Id = 5, Name = "Immediate" }
+            });
+        }
+
+        if (!dto.Scopes.Any())
+        {
+            dto.Scopes.AddRange(new[]
+            {
+                new LookupItemDto { Id = 1, Name = "Small" },
+                new LookupItemDto { Id = 2, Name = "Medium" },
+                new LookupItemDto { Id = 3, Name = "Large" }
+            });
+        }
+
+        if (!dto.DelayCosts.Any())
+        {
+            dto.DelayCosts.AddRange(new[]
+            {
+                new LookupItemDto { Id = 1, Name = "Low" },
+                new LookupItemDto { Id = 2, Name = "Medium" },
+                new LookupItemDto { Id = 3, Name = "High" }
+            });
+        }
+
+        if (!dto.Efforts.Any())
+        {
+            dto.Efforts.AddRange(new[]
+            {
+                new LookupItemDto { Id = 1, Name = "Small" },
+                new LookupItemDto { Id = 2, Name = "Medium" },
+                new LookupItemDto { Id = 3, Name = "Large" }
+            });
+        }
+    }
+
+    private Task OnImpactChanged(int v)
+    {
+        _model.Impact = v;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnUrgencyChanged(int v)
+    {
+        _model.Urgency = v;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnScopeChanged(int v)
+    {
+        _model.Scope = v;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnDelayChanged(int v)
+    {
+        _model.CostOfDelay = v;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnEffortChanged(int v)
+    {
+        _model.Effort = v;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private string GetStatusExampleLine()
+    {
+        return _stage switch
+        {
+            ProjectBusinessStage.Draft => L["StatusExample_Draft"],
+            ProjectBusinessStage.Planning => L["StatusExample_Planning"],
+            ProjectBusinessStage.Execution => L["StatusExample_Execution"],
+            ProjectBusinessStage.Validation => L["StatusExample_Validation"],
+            ProjectBusinessStage.OnHold => L["StatusExample_OnHold"],
+            ProjectBusinessStage.Done => L["StatusExample_Done"],
+            _ => L["StatusExample_Default"]
+        };
+    }
+
+    private string GetImpactExample()
+    {
+        var name = GetLookupName(_lookups?.Impacts, _model.Impact);
+        if (string.IsNullOrWhiteSpace(name))
+            return L["ImpactExample_Default"];
+
+        var n = name.ToLowerInvariant();
+
+        if (n.Contains("critical"))
+            return L["ImpactExample_Critical"];
+
+        if (n.Contains("very") && n.Contains("high"))
+            return L["ImpactExample_VeryHigh"];
+
+        if (n.Contains("high"))
+            return L["ImpactExample_High"];
+
+        if (n.Contains("medium") || n.Contains("normal"))
+            return L["ImpactExample_Medium"];
+
+        if (n.Contains("low"))
+            return L["ImpactExample_Low"];
+
+        return L["ImpactExample_Fallback"];
+    }
+
+    private string GetUrgencyExample()
+    {
+        var name = GetLookupName(_lookups?.Urgencies, _model.Urgency);
+        if (string.IsNullOrWhiteSpace(name))
+            return L["UrgencyExample_Default"];
+
+        var n = name.ToLowerInvariant();
+
+        if (n.Contains("immediate") || n.Contains("critical"))
+            return L["UrgencyExample_Immediate"];
+
+        if (n.Contains("asap"))
+            return L["UrgencyExample_ASAP"];
+
+        if (n.Contains("high"))
+            return L["UrgencyExample_High"];
+
+        if (n.Contains("normal") || n.Contains("medium"))
+            return L["UrgencyExample_Normal"];
+
+        if (n.Contains("low"))
+            return L["UrgencyExample_Low"];
+
+        return L["UrgencyExample_Fallback"];
+    }
+
+    private string GetScopeExample()
+    {
+        var name = GetLookupName(_lookups?.Scopes, _model.Scope);
+        if (string.IsNullOrWhiteSpace(name))
+            return L["ScopeExample_Default"];
+
+        var n = name.ToLowerInvariant();
+
+        if (n.Contains("large"))
+            return L["ScopeExample_Large"];
+
+        if (n.Contains("medium"))
+            return L["ScopeExample_Medium"];
+
+        if (n.Contains("small"))
+            return L["ScopeExample_Small"];
+
+        return L["ScopeExample_Fallback"];
+    }
+
+    private string GetDelayExample()
+    {
+        var name = GetLookupName(_lookups?.DelayCosts, _model.CostOfDelay);
+        if (string.IsNullOrWhiteSpace(name))
+            return L["DelayExample_Default"];
+
+        var n = name.ToLowerInvariant();
+
+        if (n.Contains("high"))
+            return L["DelayExample_High"];
+
+        if (n.Contains("medium"))
+            return L["DelayExample_Medium"];
+
+        if (n.Contains("low"))
+            return L["DelayExample_Low"];
+
+        return L["DelayExample_Fallback"];
+    }
+
+    private string GetEffortExample()
+    {
+        var name = GetLookupName(_lookups?.Efforts, _model.Effort);
+        if (string.IsNullOrWhiteSpace(name))
+            return L["EffortExample_Default"];
+
+        var n = name.ToLowerInvariant();
+
+        if (n.Contains("large"))
+            return L["EffortExample_Large"];
+
+        if (n.Contains("medium"))
+            return L["EffortExample_Medium"];
+
+        if (n.Contains("small"))
+            return L["EffortExample_Small"];
+
+        return L["EffortExample_Fallback"];
+    }
+
+    private static string GetLookupName(List<LookupItemDto>? items, int id)
+    {
+        if (items == null || items.Count == 0)
+            return string.Empty;
+
+        var it = items.FirstOrDefault(x => x.Id == id);
+        return (it?.Name ?? string.Empty).Trim();
+    }
+}

@@ -1,0 +1,960 @@
+﻿@page "/tickets/new"
+@namespace ITManager.Components.Pages.Tickets
+
+@* File: Components/Pages/Tickets/TicketCreate.razor
+   Description: Create ticket page (end-user). Strict v2 create rules: FirstAction required, dictionary weights from DB.
+   Version: 1.03
+   Created: 2026-02-08
+   Updated: 2026-02-08
+   Change log:
+   - 1.03 (2026-02-08) UX: full page sizing (width/height) + sticky footer + dark mode toggle text white.
+   - 1.02 (2026-02-08) FIX: brak preselected toggle w Create (Value nie może być null) + filtr pustych wartości ze słowników.
+   - 1.01 (2026-02-08) Urgency/Impact: użyj tego samego mechanizmu wyświetlania (CSS classes + NormalizeLevel + segmented toggle) co w TicketEdit.
+   - 1.00 (2026-02-08) Initial version.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Services
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using ITManager.Services.Auth
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize(Policy = "Perm:Tickets.View")]
+
+@inject TicketsService TicketsService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<TicketCreate> L
+@inject TimeZoneService TimeZoneService
+
+<MudPaper Class="pa-4 ticketcreate-page" Elevation="0">
+
+    <MudStack Spacing="2" Class="ticketcreate-layout">
+
+        <MudStack Spacing="0" Class="ticketcreate-header">
+            <MudText Typo="Typo.h6">@GetDialogTitle()</MudText>
+            <MudText Typo="Typo.body2" Style="opacity:0.75;">@GetDialogSubtitle()</MudText>
+        </MudStack>
+
+        <MudPaper Elevation="0" Class="pa-3 ticketcreate-securitybox">
+
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                <MudText Typo="Typo.body2">
+                    <b>@L["SecurityBoxTitle"]</b> @L["SecurityBoxText"]
+                </MudText>
+            </MudAlert>
+
+        </MudPaper>
+
+        @if (!_canCreate)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true">
+                @L["NoCreatePermission"]
+            </MudAlert>
+
+            <MudPaper Elevation="0" Class="ticketcreate-footer pa-2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Spacing="1">
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               OnClick="Cancel">
+                        @L["CloseButton"]
+                    </MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+        else if (_loading)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else
+        {
+            <div class="ticketcreate-content">
+
+                <MudGrid GutterSize="4" AlignItems="AlignItems.Stretch">
+
+                    <MudItem xs="12" md="7" Class="d-flex">
+                        <MudPaper Elevation="0" Class="pa-4 d-flex flex-column ticketcreate-card"
+                                  Style="width:100%; height:100%;">
+
+                            <MudText Typo="Typo.subtitle1" Class="mb-3">@L["DetailsSectionTitle"]</MudText>
+
+                            <MudTextField T="string"
+                                          @ref="_titleField"
+                                          Label="@L["TitleLabel"]"
+                                          @bind-Value="_title"
+                                          Variant="Variant.Outlined"
+                                          FullWidth="true"
+                                          Dense="true"
+                                          MaxLength="160"
+                                          Counter="160"
+                                          Immediate="true"
+                                          Class="mb-2"
+                                          Disabled="@_saving"
+                                          Error="@(_submitAttempted && !IsTitleValid())"
+                                          ErrorText=" " />
+
+                            <div style="min-height:18px;">
+                                @if (_submitAttempted && !IsTitleValid())
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">
+                                        @GetTitleInvalidText()
+                                    </MudText>
+                                }
+                            </div>
+
+                            <MudTextField T="string"
+                                          Label="@L["DescriptionLabel"]"
+                                          @bind-Value="_firstActionText"
+                                          Variant="Variant.Outlined"
+                                          FullWidth="true"
+                                          Lines="16"
+                                          TextAlign="TextAlign.Left"
+                                          Margin="Margin.Dense"
+                                          MaxLength="2000"
+                                          Counter="2000"
+                                          Immediate="true"
+                                          Class="mb-2 flex-grow-1 ticketcreate-desc-field"
+                                          Disabled="@_saving"
+                                          Error="@(_submitAttempted && !IsFirstActionValid())"
+                                          ErrorText=" " />
+
+                            <div style="min-height:18px;">
+                                @if (_submitAttempted && !IsFirstActionValid())
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">
+                                        @GetDescriptionInvalidText()
+                                    </MudText>
+                                }
+                            </div>
+
+                        </MudPaper>
+                    </MudItem>
+
+                    <MudItem xs="12" md="5" Class="d-flex">
+                        <MudStack Spacing="4" Class="d-flex" Style="width:100%;">
+
+                            <MudPaper Elevation="0" Class="pa-4 d-flex flex-column ticketcreate-card"
+                                      Style="@GetSectionBorderStyle(missing: _submitAttempted && string.IsNullOrWhiteSpace(_selectedUrgency), minHeightPx: 190)">
+
+                                <MudText Typo="Typo.subtitle1">@L["UrgencyTitle"]</MudText>
+                                <MudText Typo="Typo.caption" Class="mb-2">@L["UrgencyHelp"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                Value="@_selectedUrgency"
+                                                ValueChanged="OnUrgencyChanged"
+                                                Disabled="@_saving"
+                                                Class="segmented-toggle"
+                                                FullWidth="true">
+                                    @foreach (var u in _urgencyOptionsSorted)
+                                    {
+                                        var level = NormalizeLevel(u?.Name);
+                                        var isCritical = string.Equals(level, LevelCritical, StringComparison.OrdinalIgnoreCase);
+                                        var isDisabled = isCritical && !_canSelectCritical;
+                                        var css = GetSeverityToggleClass(level);
+
+                                        <MudToggleItem T="string"
+                                                       Value="@level"
+                                                       Disabled="@isDisabled"
+                                                       Class="@css">
+                                            @if (isCritical)
+                                            {
+                                                <MudTooltip Text="@GetCriticalManagersOnlyTooltip()" Placement="Placement.Top" Delay="250">
+                                                    <span style="display:inline-block;">
+                                                        @LevelLabel(level)
+                                                    </span>
+                                                </MudTooltip>
+                                            }
+                                            else
+                                            {
+                                                <span>@LevelLabel(level)</span>
+                                            }
+                                        </MudToggleItem>
+                                    }
+                                </MudToggleGroup>
+
+                                <MudText Typo="Typo.caption" Class="toggle-desc">
+                                    @GetUrgencyDescriptionOrHint()
+                                </MudText>
+
+                                @if (_submitAttempted && string.IsNullOrWhiteSpace(_selectedUrgency))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-2">
+                                        @L["UrgencyRequired"]
+                                    </MudText>
+                                }
+                            </MudPaper>
+
+                            <MudPaper Elevation="0" Class="pa-4 d-flex flex-column ticketcreate-card"
+                                      Style="@GetSectionBorderStyle(missing: _submitAttempted && string.IsNullOrWhiteSpace(_selectedImpact), minHeightPx: 210)">
+
+                                <MudText Typo="Typo.subtitle1">@L["ImpactTitle"]</MudText>
+                                <MudText Typo="Typo.caption" Class="mb-2">@L["ImpactHelp"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                Value="@_selectedImpact"
+                                                ValueChanged="OnImpactChanged"
+                                                Disabled="@_saving"
+                                                Class="segmented-toggle"
+                                                FullWidth="true">
+                                    @foreach (var i in _impactOptionsSorted)
+                                    {
+                                        var level = NormalizeLevel(i?.Name);
+                                        var isCritical = string.Equals(level, LevelCritical, StringComparison.OrdinalIgnoreCase);
+                                        var isDisabled = isCritical && !_canSelectCritical;
+                                        var css = GetSeverityToggleClass(level);
+
+                                        <MudToggleItem T="string"
+                                                       Value="@level"
+                                                       Disabled="@isDisabled"
+                                                       Class="@css">
+                                            @if (isCritical)
+                                            {
+                                                <MudTooltip Text="@GetCriticalManagersOnlyTooltip()" Placement="Placement.Top" Delay="250">
+                                                    <span style="display:inline-block;">
+                                                        @LevelLabel(level)
+                                                    </span>
+                                                </MudTooltip>
+                                            }
+                                            else
+                                            {
+                                                <span>@LevelLabel(level)</span>
+                                            }
+                                        </MudToggleItem>
+                                    }
+                                </MudToggleGroup>
+
+                                <MudText Typo="Typo.caption" Class="toggle-desc">
+                                    @GetImpactDescriptionOrHint()
+                                </MudText>
+
+                                @if (_submitAttempted && string.IsNullOrWhiteSpace(_selectedImpact))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-2">
+                                        @L["ImpactRequired"]
+                                    </MudText>
+                                }
+                            </MudPaper>
+
+                            <MudPaper Elevation="0" Class="pa-4 d-flex flex-column ticketcreate-card"
+                                      Style="width:100%;">
+
+                                <MudText Typo="Typo.subtitle1">@L["PriorityTitle"]</MudText>
+                                <MudText Typo="Typo.caption" Class="mb-2">@L["PriorityHelp"]</MudText>
+
+                                <div style="@GetPriorityBoxStyleCentered()">
+                                    @GetPriorityText()
+                                </div>
+
+                            </MudPaper>
+
+                        </MudStack>
+                    </MudItem>
+
+                </MudGrid>
+
+            </div>
+
+            <MudPaper Elevation="0" Class="ticketcreate-footer pa-2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Spacing="1">
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Send"
+                               Disabled="@(_saving || !_canCreate)"
+                               OnClick="CreateAsync">
+                        @L["SubmitButton"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               Disabled="@_saving"
+                               OnClick="Cancel">
+                        @L["CancelButton"]
+                    </MudButton>
+
+                </MudStack>
+            </MudPaper>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .ticketcreate-page {
+        width: 100%;
+        max-width: none;
+        height: calc(100vh - 110px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ticketcreate-layout {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ticketcreate-header {
+        flex: 0 0 auto;
+    }
+
+    .ticketcreate-securitybox {
+        width: 100%;
+        border: 1px solid var(--mud-palette-divider);
+        border-radius: 6px;
+        background-color: var(--mud-palette-background-paper);
+        flex: 0 0 auto;
+    }
+
+    .ticketcreate-content {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding-bottom: 6px;
+    }
+
+    .ticketcreate-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        background: var(--mud-palette-surface);
+        border-radius: 10px;
+        flex: 0 0 auto;
+    }
+
+    .ticketcreate-card {
+        border: 1px solid var(--mud-palette-divider);
+        border-radius: 6px;
+        background-color: var(--mud-palette-background-paper);
+    }
+
+    .ticketcreate-desc-field textarea {
+        min-height: 220px;
+        height: calc(100vh - 520px);
+        max-height: 720px;
+    }
+
+    .segmented-toggle .mud-toggle-item {
+        min-height: 40px;
+        font-weight: 600;
+    }
+
+    .segmented-toggle .mud-toggle-item * {
+        color: inherit;
+    }
+
+    .toggle-desc {
+        opacity: 0.8;
+        line-height: 1.35;
+        margin-top: 6px;
+        min-height: 38px;
+    }
+
+    .sev-critical {
+        background-color: rgba(211, 47, 47, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-high {
+        background-color: rgba(245, 124, 0, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-medium {
+        background-color: rgba(249, 168, 37, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-low {
+        background-color: rgba(46, 125, 50, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-info {
+        background-color: rgba(2, 136, 209, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-critical.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-critical.mud-toggle-item-selected {
+        background-color: #D32F2F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-high.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-high.mud-toggle-item-selected {
+        background-color: #F57C00 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-medium.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-medium.mud-toggle-item-selected {
+        background-color: #F9A825 !important;
+        color: #111111 !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-low.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-low.mud-toggle-item-selected {
+        background-color: #2E7D32 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-info.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-info.mud-toggle-item-selected {
+        background-color: #0288D1 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.mud-selected:hover,
+    .segmented-toggle .mud-toggle-item.mud-toggle-item-selected:hover {
+        filter: brightness(1.02);
+    }
+</style>
+
+@code
+{
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    [Parameter] public string? ReturnUrl { get; set; }
+
+    private const string PermTicketsCreateOwn = "Tickets.Create.Own";
+    private const string PermTicketsEditAll = "Tickets.Edit.All";
+    private const string PermTicketsLevelCritical = "Tickets.Level.Critical";
+
+    private const string DefaultCategoryFallback = "User support";
+
+    private const string LevelEmergency = "Emergency";
+    private const string LevelCritical = "Critical";
+    private const string LevelHigh = "High";
+    private const string LevelMedium = "Medium";
+    private const string LevelLow = "Low";
+    private const string LevelInfo = "Info";
+
+    private string _returnUrl = "/tickets/mine";
+
+    private bool _loading = true;
+    private bool _saving;
+    private bool _submitAttempted;
+
+    private bool _canCreate;
+    private bool _canSelectCritical;
+
+    private string _title = string.Empty;
+    private string _firstActionText = string.Empty;
+
+    // FIX: Value dla MudToggleGroup nie może być null, inaczej potrafi "zaznaczyć" pierwszy element w UI.
+    private string _selectedUrgency = string.Empty;
+    private string _selectedImpact = string.Empty;
+
+    private int _weightPriority;
+
+    private List<TicketsService.ImpactUrgencyItem> _urgencyOptions = new();
+    private List<TicketsService.ImpactUrgencyItem> _impactOptions = new();
+
+    private List<TicketsService.ImpactUrgencyItem> _urgencyOptionsSorted = new();
+    private List<TicketsService.ImpactUrgencyItem> _impactOptionsSorted = new();
+
+    private MudTextField<string>? _titleField;
+    private bool _titleFocused;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _returnUrl = NormalizeReturnUrl(ReturnUrl);
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            var isOkUser = ctx.IsAuthenticated && ctx.IsActive == true;
+
+            _canCreate = isOkUser && (ctx.Has(PermTicketsCreateOwn) || ctx.Has(PermTicketsEditAll));
+            _canSelectCritical = isOkUser && ctx.Has(PermTicketsLevelCritical);
+        }
+        catch
+        {
+            _canCreate = false;
+            _canSelectCritical = false;
+        }
+
+        try
+        {
+            var dict = await TicketsService.GetImpactAndUrgencyDictionaryAsync();
+            _impactOptions = dict?.Impacts ?? new List<TicketsService.ImpactUrgencyItem>();
+            _urgencyOptions = dict?.Urgencies ?? new List<TicketsService.ImpactUrgencyItem>();
+        }
+        catch
+        {
+            _impactOptions = new List<TicketsService.ImpactUrgencyItem>();
+            _urgencyOptions = new List<TicketsService.ImpactUrgencyItem>();
+        }
+
+        // FIX: filtrujemy puste/whitespace nazwy, żeby nie wygenerować toggle o Value="",
+        // bo to potrafi wyglądać jak "zaznaczone" przy pustej wartości.
+        _urgencyOptionsSorted = SortLevelsForUi(_urgencyOptions, isImpact: false)
+            .Where(x => !string.IsNullOrWhiteSpace(NormalizeLevel(x?.Name)))
+            .ToList();
+
+        _impactOptionsSorted = SortLevelsForUi(_impactOptions, isImpact: true)
+            .Where(x => !string.IsNullOrWhiteSpace(NormalizeLevel(x?.Name)))
+            .ToList();
+
+        if (!_canSelectCritical)
+        {
+            if (string.Equals(NormalizeLevel(_selectedUrgency), LevelCritical, StringComparison.OrdinalIgnoreCase))
+                _selectedUrgency = string.Empty;
+
+            if (string.Equals(NormalizeLevel(_selectedImpact), LevelCritical, StringComparison.OrdinalIgnoreCase))
+                _selectedImpact = string.Empty;
+        }
+
+        RecalculatePriority();
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_loading || !_canCreate)
+            return;
+
+        if (_titleFocused)
+            return;
+
+        _titleFocused = true;
+
+        try
+        {
+            if (_titleField is not null)
+                await _titleField.FocusAsync();
+        }
+        catch
+        {
+        }
+    }
+
+    private void Cancel()
+    {
+        NavigationManager.NavigateTo(_returnUrl, forceLoad: false, replace: true);
+    }
+
+    private Task OnUrgencyChanged(string value)
+    {
+        _selectedUrgency = NormalizeLevel(value);
+        RecalculatePriority();
+        return Task.CompletedTask;
+    }
+
+    private Task OnImpactChanged(string value)
+    {
+        _selectedImpact = NormalizeLevel(value);
+        RecalculatePriority();
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_saving)
+            return;
+
+        if (!_canCreate)
+        {
+            Snackbar.Add(L["NoCreatePermission"], Severity.Warning);
+            return;
+        }
+
+        _submitAttempted = true;
+        RecalculatePriority();
+
+        if (!IsFormValid())
+        {
+            Snackbar.Add(L["FormInvalidWarning"], Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            var createdAtUtc = DateTime.UtcNow;
+
+            var req = new TicketsService.CreateTicketRequest
+            {
+                Title = _title.Trim(),
+                FirstActionText = _firstActionText.Trim(),
+                CategoryName = GetDefaultCategoryName(),
+                ImpactName = NormalizeLevel(_selectedImpact),
+                UrgencyName = NormalizeLevel(_selectedUrgency),
+                RequesterDisplayName = null
+            };
+
+            var newTicketId = await TicketsService.CreateTicketAsync(req);
+
+            string displayCode;
+            try
+            {
+                var ticket = await TicketsService.GetTicketByIdAsync((int)Math.Min(int.MaxValue, newTicketId));
+                displayCode = string.IsNullOrWhiteSpace(ticket?.TicketCode) ? newTicketId.ToString() : ticket!.TicketCode.Trim();
+            }
+            catch
+            {
+                displayCode = newTicketId.ToString();
+            }
+
+            var createdAtLocal = await TimeZoneService.FromUtcAsync(createdAtUtc);
+
+            var msg = string.Format(L["TicketCreatedSuccess"], displayCode);
+            msg += $" ({createdAtLocal:yyyy-MM-dd HH:mm})";
+
+            Snackbar.Add(msg, Severity.Success);
+            NavigationManager.NavigateTo(_returnUrl, forceLoad: false, replace: true);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoCreatePermission"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketCreatePage.CreateAsync] ERROR: {ex}");
+            Snackbar.Add(string.Format(L["SaveError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private string GetDialogTitle()
+    {
+        var v = L["DialogTitle"].Value;
+        if (!string.IsNullOrWhiteSpace(v) && !string.Equals(v, "DialogTitle", StringComparison.Ordinal))
+            return v;
+
+        return "Nowe zgłoszenie";
+    }
+
+    private string GetDialogSubtitle()
+    {
+        var v = L["DialogSubtitle"].Value;
+        if (!string.IsNullOrWhiteSpace(v) && !string.Equals(v, "DialogSubtitle", StringComparison.Ordinal))
+            return v;
+
+        return "Opisz problem i wybierz Pilność oraz Wpływ. Priorytet zostanie wyliczony automatycznie.";
+    }
+
+    private string GetCriticalManagersOnlyTooltip()
+    {
+        var loc = L["CriticalManagersOnlyTooltip"].Value;
+        if (!string.IsNullOrWhiteSpace(loc) && !string.Equals(loc, "CriticalManagersOnlyTooltip", StringComparison.Ordinal))
+            return loc;
+
+        return "Poziom Krytyczne jest dostępny wyłącznie dla menedżerów. Użyj go tylko w sytuacjach wymagających eskalacji.";
+    }
+
+    private string LevelLabel(string code)
+    {
+        var c = NormalizeLevel(code);
+        var key = $"Level_{c}";
+        var text = L[key];
+        return string.IsNullOrWhiteSpace(text) ? c : text;
+    }
+
+    private string GetTitleInvalidText()
+    {
+        var v = L["TitleTooShort"].Value;
+        if (!string.IsNullOrWhiteSpace(v) && !string.Equals(v, "TitleTooShort", StringComparison.Ordinal))
+            return v;
+
+        return "Tytuł jest zbyt krótki.";
+    }
+
+    private string GetDescriptionInvalidText()
+    {
+        var v = L["DescriptionTooShort"].Value;
+        if (!string.IsNullOrWhiteSpace(v) && !string.Equals(v, "DescriptionTooShort", StringComparison.Ordinal))
+            return v;
+
+        return "Opis jest zbyt krótki.";
+    }
+
+    private string NormalizeReturnUrl(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "/tickets/mine";
+
+        raw = raw.Trim();
+
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var abs))
+        {
+            var appBase = new Uri(NavigationManager.BaseUri);
+            if (!string.Equals(abs.Host, appBase.Host, StringComparison.OrdinalIgnoreCase))
+                return "/tickets/mine";
+
+            return abs.PathAndQuery.StartsWith("/", StringComparison.Ordinal) ? abs.PathAndQuery : "/tickets/mine";
+        }
+
+        if (!raw.StartsWith("/", StringComparison.Ordinal))
+            return "/tickets/mine";
+
+        if (raw.StartsWith("//", StringComparison.Ordinal))
+            return "/tickets/mine";
+
+        if (raw.Contains("\r") || raw.Contains("\n"))
+            return "/tickets/mine";
+
+        return raw;
+    }
+
+    private void RecalculatePriority()
+    {
+        var impactWeight = GetImpactWeight(_selectedImpact);
+        var urgencyWeight = GetUrgencyWeight(_selectedUrgency);
+        _weightPriority = impactWeight * urgencyWeight;
+    }
+
+    private bool IsTitleValid()
+    {
+        var t = (_title ?? string.Empty).Trim();
+        return t.Length >= 3 && t.Length <= 160;
+    }
+
+    private bool IsFirstActionValid()
+    {
+        var d = (_firstActionText ?? string.Empty).Trim();
+        return d.Length >= 3 && d.Length <= 2000;
+    }
+
+    private bool IsFormValid()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedUrgency))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(_selectedImpact))
+            return false;
+
+        if (!IsTitleValid())
+            return false;
+
+        if (!IsFirstActionValid())
+            return false;
+
+        if (!_canSelectCritical)
+        {
+            if (string.Equals(NormalizeLevel(_selectedUrgency), LevelCritical, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (string.Equals(NormalizeLevel(_selectedImpact), LevelCritical, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
+    private string GetUrgencyDescriptionOrHint()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedUrgency))
+            return L["SelectUrgencyHint"];
+
+        var key = GetUrgencyDescriptionKey(_selectedUrgency);
+        return string.IsNullOrWhiteSpace(key) ? string.Empty : L[key];
+    }
+
+    private string GetImpactDescriptionOrHint()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedImpact))
+            return L["SelectImpactHint"];
+
+        var key = GetImpactDescriptionKey(_selectedImpact);
+        return string.IsNullOrWhiteSpace(key) ? string.Empty : L[key];
+    }
+
+    private int GetImpactWeight(string impact)
+    {
+        var n = NormalizeLevel(impact);
+        if (string.IsNullOrWhiteSpace(n))
+            return 0;
+
+        var item = _impactOptions.FirstOrDefault(x => string.Equals(NormalizeLevel(x?.Name), n, StringComparison.OrdinalIgnoreCase));
+        return item?.Weight ?? 0;
+    }
+
+    private int GetUrgencyWeight(string urgency)
+    {
+        var n = NormalizeLevel(urgency);
+        if (string.IsNullOrWhiteSpace(n))
+            return 0;
+
+        var item = _urgencyOptions.FirstOrDefault(x => string.Equals(NormalizeLevel(x?.Name), n, StringComparison.OrdinalIgnoreCase));
+        return item?.Weight ?? 0;
+    }
+
+    private string GetPriorityText()
+    {
+        if (_weightPriority <= 0)
+            return L["PriorityNone"];
+
+        var code = GetPriorityCode(_weightPriority);
+        return GetPriorityLabel(code);
+    }
+
+    private string GetPriorityLabel(string code) => code switch
+    {
+        "P1" => L["PriorityP1"],
+        "P2" => L["PriorityP2"],
+        "P3" => L["PriorityP3"],
+        "P4" => L["PriorityP4"],
+        "P5" => L["PriorityP5"],
+        _ => L["PriorityNone"]
+    };
+
+    private static string GetPriorityCode(int score)
+    {
+        if (score >= 80) return "P1";
+        if (score >= 50) return "P2";
+        if (score >= 30) return "P3";
+        if (score >= 15) return "P4";
+        if (score >= 1) return "P5";
+        return "NONE";
+    }
+
+    private static string GetUrgencyDescriptionKey(string? name) => NormalizeLevel(name) switch
+    {
+        LevelCritical => "UrgencyDescCritical",
+        LevelHigh => "UrgencyDescHigh",
+        LevelMedium => "UrgencyDescMedium",
+        LevelLow => "UrgencyDescLow",
+        _ => string.Empty
+    };
+
+    private static string GetImpactDescriptionKey(string? name) => NormalizeLevel(name) switch
+    {
+        LevelCritical => "ImpactDescCritical",
+        LevelHigh => "ImpactDescHigh",
+        LevelMedium => "ImpactDescMedium",
+        LevelLow => "ImpactDescLow",
+        LevelInfo => "ImpactDescInfo",
+        _ => string.Empty
+    };
+
+    private string GetSeverityToggleClass(string level)
+    {
+        var l = NormalizeLevel(level);
+
+        return l switch
+        {
+            LevelCritical => "sev-critical",
+            LevelHigh => "sev-high",
+            LevelMedium => "sev-medium",
+            LevelLow => "sev-low",
+            LevelInfo => "sev-info",
+            _ => "sev-info"
+        };
+    }
+
+    private static string NormalizeLevel(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        if (string.Equals(s, LevelEmergency, StringComparison.OrdinalIgnoreCase))
+            return LevelCritical;
+
+        if (string.Equals(s, LevelCritical, StringComparison.OrdinalIgnoreCase)) return LevelCritical;
+        if (string.Equals(s, LevelHigh, StringComparison.OrdinalIgnoreCase)) return LevelHigh;
+        if (string.Equals(s, LevelMedium, StringComparison.OrdinalIgnoreCase)) return LevelMedium;
+        if (string.Equals(s, LevelLow, StringComparison.OrdinalIgnoreCase)) return LevelLow;
+        if (string.Equals(s, LevelInfo, StringComparison.OrdinalIgnoreCase)) return LevelInfo;
+
+        return s;
+    }
+
+    private static string GetSectionBorderStyle(bool missing, int minHeightPx)
+    {
+        var border = missing ? "1px solid var(--mud-palette-error)" : "1px solid var(--mud-palette-divider)";
+        return $"width:100%; min-height:{minHeightPx}px; border:{border}; border-radius:6px; background-color: var(--mud-palette-background-paper);";
+    }
+
+    private string GetPriorityBoxStyleCentered()
+    {
+        var code = GetPriorityCode(_weightPriority);
+
+        var fill = code switch
+        {
+            "P1" => "#D32F2F",
+            "P2" => "#D32F2F",
+            "P3" => "#F57C00",
+            "P4" => "#0288D1",
+            "P5" => "#2E7D32",
+            _ => "#607D8B"
+        };
+
+        const string borderColor = "#0288D1";
+
+        return "margin-top:14px; padding:16px 16px; border-radius:6px; " +
+               $"background-color:{fill}; color:#FFFFFF; border:1px solid {borderColor}; " +
+               "display:flex; align-items:center; justify-content:center; font-weight:600;";
+    }
+
+    private string GetDefaultCategoryName()
+    {
+        var v = L["DefaultCategoryName"].Value;
+        if (!string.IsNullOrWhiteSpace(v) && !string.Equals(v, "DefaultCategoryName", StringComparison.Ordinal))
+            return v.Trim();
+
+        return DefaultCategoryFallback;
+    }
+
+    private static List<TicketsService.ImpactUrgencyItem> SortLevelsForUi(List<TicketsService.ImpactUrgencyItem> items, bool isImpact)
+    {
+        if (items is null || items.Count == 0)
+            return new List<TicketsService.ImpactUrgencyItem>();
+
+        return items
+            .OrderBy(x => GetUiOrder(NormalizeLevel(x?.Name), isImpact))
+            .ThenBy(x => NormalizeLevel(x?.Name), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static int GetUiOrder(string name, bool isImpact)
+    {
+        name = NormalizeLevel(name);
+
+        if (isImpact)
+        {
+            return name switch
+            {
+                LevelInfo => 0,
+                LevelLow => 10,
+                LevelMedium => 20,
+                LevelHigh => 30,
+                LevelCritical => 40,
+                _ => 999
+            };
+        }
+
+        return name switch
+        {
+            LevelLow => 10,
+            LevelMedium => 20,
+            LevelHigh => 30,
+            LevelCritical => 40,
+            _ => 999
+        };
+    }
+}

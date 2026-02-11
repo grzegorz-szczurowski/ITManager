@@ -1,0 +1,482 @@
+﻿@namespace ITManager.Components.Pages.Tickets
+
+@* File: Components/Pages/Tickets/TicketActionDialog.razor
+   Description: Dialog dodawania i edycji czynności (worklog) do ticketa plus opcjonalna zmiana statusu.
+                Opis jest obowiązkowy. Status wybierany w dialogu. Public steruje widocznością.
+   Version: 1.25
+   Created: 2026-01-15
+   Updated:
+     - 2026-01-18: i18n: waiting reasons + komunikaty błędów i UI
+     - 2026-01-20: FIX: jeśli TargetStatus jest pusty, wysyłamy CurrentStatusName (żeby nie wylądować z null)
+     - 2026-02-02: RBAC: dostosowanie do nowej architektury Tickets.* (Own/Assigned/Team/All) + usunięcie refleksji przy update
+     - 2026-02-02: RBAC: spójne mechanizmy z TicketsService: rozdzielenie "add" vs "edit", blokada private bez uprawnień operatora, status change tylko dla operatora/admina
+     - 2026-02-02: Style: stałe PermTickets* i spójne HasAny
+     - 2026-02-03: RBAC UX: przełącznik Public widoczny tylko dla operator/admin (permissions-based), zwykły user nie widzi przełącznika
+     - 2026-02-03: RBAC UX: sekcja zmiany statusu niewidoczna dla userów bez uprawnień (permissions-based)
+     - 1.25 (2026-02-03) RBAC UX: przełącznik Public i zmiana statusu widoczne tylko dla Tickets.Edit.All lub Tickets.Edit.Assigned
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject TicketsService TicketsService
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<TicketActionDialog> L
+
+<MudDialog Style="max-width: 900px;">
+
+    <DialogContent>
+
+        <MudPaper Class="pa-4" Elevation="0">
+
+            <MudStack Spacing="3">
+
+                @if (!_canEditActions)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                        @L["NoPermissionEditActions"]
+                    </MudAlert>
+                }
+
+                <MudText Typo="Typo.subtitle2">
+                    @L["Subtitle"]
+                </MudText>
+
+                <MudTextField T="string"
+                              Label="@L["ActionTextLabel"]"
+                              Variant="Variant.Outlined"
+                              FullWidth="true"
+                              Lines="10"
+                              Immediate="true"
+                              MaxLength="2000"
+                              Counter="2000"
+                              @bind-Value="_actionText"
+                              Disabled="@(!_canEditActions || _saving)"
+                              Error="@(_submitAttempted && !IsActionTextValid())"
+                              ErrorText=" " />
+
+                @if (_submitAttempted && !IsActionTextValid())
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">
+                        @L["ActionTextRequired"]
+                    </MudText>
+                }
+
+                @if (_canSeePublicToggle)
+                {
+                    <MudSwitch T="bool"
+                               Color="Color.Primary"
+                               Disabled="@(!_canEditActions || _saving || !_canWritePrivate)"
+                               @bind-Value="_isPublic">
+                        @L["IsPublicLabel"]
+                    </MudSwitch>
+
+                    @if (!_canWritePrivate)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @L["PrivateNotAllowedInfo"]
+                        </MudText>
+                    }
+                }
+
+                @if (_canChangeStatus)
+                {
+                    <MudDivider />
+
+                    <MudSelect T="string"
+                               Label="@L["TargetStatusLabel"]"
+                               Variant="Variant.Outlined"
+                               Dense="true"
+                               Clearable="true"
+                               FullWidth="true"
+                               Disabled="@(!_canEditActions || _saving)"
+                               @bind-Value="TargetStatus"
+                               HelperText="@L["TargetStatusHelp"]">
+                        @foreach (var s in AllowedStatusesForUi())
+                        {
+                            <MudSelectItem T="string" Value="@s">@s</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    @if (IsWaitingTarget())
+                    {
+                        <MudSelect T="string"
+                                   Label="@L["WaitingReasonLabel"]"
+                                   Variant="Variant.Outlined"
+                                   Dense="true"
+                                   FullWidth="true"
+                                   Disabled="@(!_canEditActions || _saving)"
+                                   @bind-Value="_waitingReasonCode"
+                                   Error="@(_submitAttempted && !IsWaitingReasonValid())"
+                                   ErrorText=" ">
+                            @foreach (var reasonCode in _waitingReasonCodes)
+                            {
+                                <MudSelectItem T="string" Value="@reasonCode">@GetWaitingReasonLabel(reasonCode)</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        @if (_submitAttempted && !IsWaitingReasonValid())
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Error">
+                                @L["WaitingReasonRequired"]
+                            </MudText>
+                        }
+                    }
+                }
+
+                <MudStack Row="true" Justify="Justify.FlexEnd" AlignItems="AlignItems.Center" Spacing="2">
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Save"
+                               Disabled="@(_saving || !_canEditActions)"
+                               OnClick="SaveAsync">
+                        @L["SaveButton"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               Disabled="@_saving"
+                               OnClick="Cancel">
+                        @L["CancelButton"]
+                    </MudButton>
+
+                </MudStack>
+
+            </MudStack>
+
+        </MudPaper>
+
+    </DialogContent>
+
+</MudDialog>
+
+@code
+{
+    [CascadingParameter] private IMudDialogInstance DialogInstance { get; set; } = default!;
+
+    [Parameter] public long TicketId { get; set; }
+    [Parameter] public long ActionId { get; set; }
+
+    [Parameter] public string CurrentStatusName { get; set; } = string.Empty;
+    [Parameter] public List<string> AllowedStatuses { get; set; } = new();
+
+    [Parameter] public string? ExistingActionText { get; set; }
+    [Parameter] public bool? ExistingIsPublic { get; set; }
+    [Parameter] public string? ExistingTargetStatusName { get; set; }
+    [Parameter] public string? ExistingWaitingReasonCode { get; set; }
+
+    // =========================
+    // RBAC (nowa architektura, styl nazw PermTickets*)
+    // =========================
+    private const string PermTicketsViewOwn = "Tickets.View.Own";
+    private const string PermTicketsViewAssigned = "Tickets.View.Assigned";
+    private const string PermTicketsViewTeam = "Tickets.View.Team";
+    private const string PermTicketsViewAll = "Tickets.View.All";
+
+    private const string PermTicketsCreateOwn = "Tickets.Create.Own";
+
+    private const string PermTicketsEditOwn = "Tickets.Edit.Own";
+    private const string PermTicketsEditAssigned = "Tickets.Edit.Assigned";
+    private const string PermTicketsEditTeam = "Tickets.Edit.Team";
+    private const string PermTicketsEditAll = "Tickets.Edit.All";
+
+    private const string PermTicketsAssignTeam = "Tickets.Assign.Team";
+
+    private bool _saving;
+    private bool _submitAttempted;
+
+    private bool _canEditActions;
+    private bool _canWritePrivate;
+    private bool _canChangeStatus;
+
+    // UI gate: przełącznik Public widzi tylko Tickets.Edit.All lub Tickets.Edit.Assigned
+    private bool _canSeePublicToggle;
+
+    private string _actionText = string.Empty;
+    private bool _isPublic = true;
+
+    private string? _targetStatus;
+    private string? _waitingReasonCode;
+
+    private readonly List<string> _waitingReasonCodes = new()
+    {
+        "USER",
+        "3RD",
+        "HOLD",
+        "OTHER"
+    };
+
+    private bool _isEditMode => ActionId > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        bool HasAny(params string[] perms)
+            => perms != null && perms.Any(p => !string.IsNullOrWhiteSpace(p) && ctx.Has(p));
+
+        var isOkUser = ctx.IsAuthenticated && ctx.IsActive == true;
+
+        var canEnterTicketsModule = isOkUser && HasAny(
+            PermTicketsViewOwn, PermTicketsViewAssigned, PermTicketsViewTeam, PermTicketsViewAll,
+            PermTicketsCreateOwn,
+            PermTicketsEditOwn, PermTicketsEditAssigned, PermTicketsEditTeam, PermTicketsEditAll,
+            PermTicketsAssignTeam
+        );
+
+        // Operator-like (spójne z backendem): Assign albo dowolne Edit.*
+        var canOperate = isOkUser && HasAny(
+            PermTicketsAssignTeam,
+            PermTicketsEditAll, PermTicketsEditTeam, PermTicketsEditAssigned, PermTicketsEditOwn
+        );
+
+        // Widoczność przełącznika Public i sekcji zmiany statusu tylko dla Edit.All lub Edit.Assigned
+        var canSeeSensitiveUi = isOkUser && HasAny(PermTicketsEditAll, PermTicketsEditAssigned);
+
+        _canSeePublicToggle = canSeeSensitiveUi;
+
+        _canWritePrivate = isOkUser && await TicketsService.CanCurrentUserWritePrivateTicketActionsAsync();
+
+        _canEditActions = _isEditMode
+            ? canOperate
+            : canEnterTicketsModule;
+
+        // Zmiana statusu w tej samej transakcji co akcja: tylko gdy user ma Edit.All lub Edit.Assigned
+        _canChangeStatus = _canEditActions && canSeeSensitiveUi;
+
+        // Jeśli nie wolno pisać private lub user nie widzi przełącznika, to akcja musi być publiczna
+        if (!_canWritePrivate || !_canSeePublicToggle)
+            _isPublic = true;
+
+        if (_isEditMode)
+        {
+            _actionText = (ExistingActionText ?? string.Empty).Trim();
+
+            _isPublic = ExistingIsPublic ?? true;
+            if (!_canWritePrivate || !_canSeePublicToggle)
+                _isPublic = true;
+
+            var prefStatus = (ExistingTargetStatusName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(prefStatus))
+                prefStatus = (CurrentStatusName ?? string.Empty).Trim();
+
+            _targetStatus = NormalizeStatusForUi(prefStatus);
+            _waitingReasonCode = (ExistingWaitingReasonCode ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(_waitingReasonCode))
+                _waitingReasonCode = null;
+        }
+        else
+        {
+            var current = (CurrentStatusName ?? string.Empty).Trim();
+            _targetStatus = NormalizeStatusForUi(current);
+            _isPublic = true;
+        }
+
+        // Jeśli user nie może zmieniać statusu, zawsze wracamy do bieżącego statusu
+        if (!_canChangeStatus)
+        {
+            var current = (CurrentStatusName ?? string.Empty).Trim();
+            _targetStatus = NormalizeStatusForUi(current);
+            _waitingReasonCode = null;
+        }
+
+        if (IsWaitingTarget() && string.IsNullOrWhiteSpace(_waitingReasonCode))
+            _waitingReasonCode = _waitingReasonCodes.FirstOrDefault();
+    }
+
+    private string GetWaitingReasonLabel(string code)
+    {
+        code = (code ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(code))
+            return string.Empty;
+
+        var key = $"WaitingReason.{code}";
+        var localized = L[key];
+
+        if (string.Equals(localized.Value, key, StringComparison.Ordinal))
+            return code;
+
+        return localized.Value;
+    }
+
+    private string? TargetStatus
+    {
+        get => _targetStatus;
+        set
+        {
+            _targetStatus = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+            if (!IsWaitingTarget())
+                _waitingReasonCode = null;
+            else if (string.IsNullOrWhiteSpace(_waitingReasonCode))
+                _waitingReasonCode = _waitingReasonCodes.FirstOrDefault();
+        }
+    }
+
+    private IEnumerable<string> AllowedStatusesSafe()
+    {
+        var list = AllowedStatuses ?? new List<string>();
+        return list
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private IEnumerable<string> AllowedStatusesForUi()
+    {
+        var baseList = AllowedStatusesSafe().ToList();
+
+        var current = (CurrentStatusName ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(current) &&
+            !baseList.Any(x => string.Equals(x, current, StringComparison.OrdinalIgnoreCase)))
+        {
+            baseList.Insert(0, current);
+        }
+
+        return baseList;
+    }
+
+    private string? NormalizeStatusForUi(string? status)
+    {
+        var s = (status ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+
+        var allowedUi = AllowedStatusesForUi();
+        var match = allowedUi.FirstOrDefault(x => string.Equals(x, s, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(match) ? null : match;
+    }
+
+    private bool IsWaitingTarget()
+        => string.Equals((_targetStatus ?? string.Empty).Trim(), "Waiting", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsActionTextValid()
+    {
+        var t = (_actionText ?? string.Empty).Trim();
+        return t.Length >= 3 && t.Length <= 2000;
+    }
+
+    private bool IsWaitingReasonValid()
+    {
+        if (!IsWaitingTarget())
+            return true;
+
+        return !string.IsNullOrWhiteSpace((_waitingReasonCode ?? string.Empty).Trim());
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving)
+            return;
+
+        if (!_canEditActions)
+        {
+            Snackbar.Add(L["NoPermissionEditActions"].Value, Severity.Warning);
+            return;
+        }
+
+        _submitAttempted = true;
+
+        if (!IsActionTextValid() || !IsWaitingReasonValid())
+        {
+            Snackbar.Add(L["FormInvalidWarning"].Value, Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            var text = (_actionText ?? string.Empty).Trim();
+
+            // Jeśli nie wolno pisać private lub user nie widzi przełącznika, to zawsze public
+            if (!_canWritePrivate || !_canSeePublicToggle)
+                _isPublic = true;
+
+            var current = (CurrentStatusName ?? string.Empty).Trim();
+            var targetRaw = string.IsNullOrWhiteSpace(_targetStatus) ? null : _targetStatus.Trim();
+
+            // FIX: gdy user wyczyści select, traktujemy to jako pozostaw bieżący status
+            var target = string.IsNullOrWhiteSpace(targetRaw)
+                ? (string.IsNullOrWhiteSpace(current) ? null : current)
+                : targetRaw;
+
+            // Bez uprawnień do zmiany statusu nie pozwalamy faktycznie zmieniać statusu z dialogu
+            if (!_canChangeStatus)
+                target = string.IsNullOrWhiteSpace(current) ? null : current;
+
+            var waiting = string.IsNullOrWhiteSpace(_waitingReasonCode) ? null : _waitingReasonCode.Trim();
+            if (!string.Equals(target, "Waiting", StringComparison.OrdinalIgnoreCase))
+                waiting = null;
+
+            long id;
+
+            if (!_isEditMode)
+            {
+                id = await TicketsService.AddTicketActionAsync(
+                    ticketId: TicketId,
+                    actionText: text,
+                    isPublic: _isPublic,
+                    targetStatusName: target,
+                    waitingReasonCode: waiting
+                );
+            }
+            else
+            {
+                id = await TicketsService.UpdateTicketActionAsync(
+                    ticketId: TicketId,
+                    actionId: ActionId,
+                    actionText: text,
+                    isPublic: _isPublic,
+                    targetStatusName: target,
+                    waitingReasonCode: waiting
+                );
+            }
+
+            DialogInstance.Close(DialogResult.Ok(id));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoPermissionEditActions"].Value, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketActionDialog.SaveAsync] ERROR: {ex}");
+            Snackbar.Add(string.Format(L["SaveError"].Value, ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        DialogInstance.Cancel();
+    }
+
+    // =========================
+    // Lista uprawnień używanych w tym pliku
+    // =========================
+    // Tickets.View.Own
+    // Tickets.View.Assigned
+    // Tickets.View.Team
+    // Tickets.View.All
+    // Tickets.Create.Own
+    // Tickets.Edit.Own
+    // Tickets.Edit.Assigned
+    // Tickets.Edit.Team
+    // Tickets.Edit.All
+    // Tickets.Assign.Team
+}

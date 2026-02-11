@@ -1,0 +1,83 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+
+		<!-- IIS / Windows Auth -->
+		<WindowsAuthentication>true</WindowsAuthentication>
+		<AnonymousAuthentication>false</AnonymousAuthentication>
+
+		<UserSecretsId>564065fc-e8b1-406a-9a48-c7be700170db</UserSecretsId>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Content Remove="Components\Pages\Assets\Devices\__DeviceEditDialog.razor" />
+	</ItemGroup>
+
+	<!-- ========================= -->
+	<!-- NuGet packages -->
+	<!-- ========================= -->
+	<ItemGroup>
+		<PackageReference Include="ClosedXML" Version="0.105.0" />
+		<PackageReference Include="MudBlazor" Version="8.15.0" />
+		<PackageReference Include="QRCoder" Version="1.7.0" />
+		<PackageReference Include="System.Data.SqlClient" Version="4.9.0" />
+		<PackageReference Include="QuestPDF" Version="2024.3.0" />
+		<PackageReference Include="System.DirectoryServices" Version="8.0.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
+	</ItemGroup>
+
+	<!-- ========================= -->
+	<!-- Static content -->
+	<!-- ========================= -->
+	<ItemGroup>
+		<Folder Include="wwwroot\fonts\" />
+	</ItemGroup>
+
+	<!-- ========================= -->
+	<!-- Localization resources -->
+	<!-- resx obok .razor -->
+	<!-- ========================= -->
+	<ItemGroup>
+
+		<!-- Dashboard -->
+		<EmbeddedResource Update="Components\Pages\Dashboard.resx" />
+		<EmbeddedResource Update="Components\Pages\Dashboard.pl-PL.resx" />
+
+		<!-- Layout -->
+		<EmbeddedResource Update="Components\Layout\MainLayout.resx" />
+		<EmbeddedResource Update="Components\Layout\MainLayout.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Layout\AppNavMenu.resx" />
+		<EmbeddedResource Update="Components\Layout\AppNavMenu.pl-PL.resx" />
+
+		<!-- Assets -->
+		<EmbeddedResource Update="Components\Pages\Assets\Agreements\Agreements.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Agreements\Agreements.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\Users\Users.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Users\Users.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\SimCards\SimCards.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\SimCards\SimCards.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\Systems\Systems.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Systems\Systems.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\Licenses\Licenses.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Licenses\Licenses.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\Devices\Devices.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Devices\Devices.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Assets\Devices\DeviceEditDialog.resx" />
+		<EmbeddedResource Update="Components\Pages\Assets\Devices\DeviceEditDialog.pl-PL.resx" />
+
+		<EmbeddedResource Update="Components\Pages\Contacts\ContactInfoDialog.resx" />
+		<EmbeddedResource Update="Components\Pages\Contacts\ContactInfoDialog.pl-PL.resx" />
+
+	</ItemGroup>
+
+</Project>

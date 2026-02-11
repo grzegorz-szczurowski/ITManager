@@ -1,0 +1,535 @@
+﻿@* File: Components/Pages/Tickets/Scheduler/DefinitionEditDialog.razor
+   Description: Modal do edycji ScheduledTicketDefinition (zadania cyklicznego).
+   Notes:
+   - DTO trzyma harmonogram w UTC (ScheduleStartAtUtc / EndAtUtc / NextRunAtUtc).
+   - UI pokazuje daty w czasie lokalnym zakładu (ScheduleTimeZoneId), a przy zapisie konwertuje do UTC.
+   - ScheduleTimeZoneId nie jest edytowane w UI, tylko domyślnie ustawiane (TimeZoneInfo.Local.Id).
+*@
+
+@using System
+@using System.Linq
+@using System.Collections.Generic
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using MudBlazor
+@using ITManager.Services.Scheduling
+@using ITManager.Services.Auth
+
+@inject ScheduledTicketDefinitionsService DefinitionsService
+@inject TicketSchedulerService SchedulerLookups
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form" Model="@Model">
+            <MudStack Spacing="3">
+
+                <MudText Typo="Typo.h6">Zadanie cykliczne</MudText>
+
+                <MudGrid>
+                    <MudItem xs="12" md="8">
+                        <MudTextField @bind-Value="Model.Name"
+                                      Label="Nazwa"
+                                      Variant="Variant.Outlined"
+                                      Required="true"
+                                      RequiredError="Nazwa jest wymagana"
+                                      Immediate="true" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSwitch T="bool"
+                                   @bind-Value="Model.IsEnabled"
+                                   Color="Color.Success"
+                                   Label="Aktywne" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="Model.TitleTemplate"
+                                      Label="Tytuł (template)"
+                                      HelperText="Prefix [OKRESOWE] jest dodawany automatycznie. Tokeny: {Now}, {Date}, {Year}, {Month}, {Day}"
+                                      Variant="Variant.Outlined"
+                                      Required="true"
+                                      RequiredError="Tytuł jest wymagany"
+                                      Immediate="true" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="Model.DescriptionTemplate"
+                                      Label="Opis (template)"
+                                      HelperText="Tokeny: {Now}, {Date}, {Year}, {Month}, {Day}"
+                                      Variant="Variant.Outlined"
+                                      Lines="6"
+                                      Immediate="true" />
+                    </MudItem>
+                </MudGrid>
+
+                <MudDivider />
+
+                <MudText Typo="Typo.subtitle2">Domyślne wartości ticketa</MudText>
+
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudSelect T="int?"
+                                   Label="Kategoria"
+                                   Value="Model.CategoryId"
+                                   ValueChanged="OnCategoryChanged"
+                                   Dense="true"
+                                   Variant="Variant.Outlined"
+                                   Clearable="true"
+                                   Disabled="@_lookupsLoading">
+                            @foreach (var item in _categories)
+                            {
+                                <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSelect T="byte?"
+                                   Label="Impact"
+                                   Value="Model.Impact"
+                                   ValueChanged="OnImpactChanged"
+                                   Dense="true"
+                                   Variant="Variant.Outlined"
+                                   Clearable="true"
+                                   Disabled="@_lookupsLoading">
+                            @foreach (var item in _impacts)
+                            {
+                                <MudSelectItem T="byte?" Value="@item.Id">@($"{item.Name} (w: {item.Weight})")</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSelect T="byte?"
+                                   Label="Urgency"
+                                   Value="Model.Urgency"
+                                   ValueChanged="OnUrgencyChanged"
+                                   Dense="true"
+                                   Variant="Variant.Outlined"
+                                   Clearable="true"
+                                   Disabled="@_lookupsLoading">
+                            @foreach (var item in _urgencies)
+                            {
+                                <MudSelectItem T="byte?" Value="@item.Id">@($"{item.Name} (w: {item.Weight})")</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        <MudText Typo="Typo.caption" Class="mt-1">
+                            Score: @ScoreText
+                        </MudText>
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        <MudSelect T="int"
+                                   Label="Requester (kto zgłasza)"
+                                   Value="Model.RequesterUserId"
+                                   ValueChanged="OnRequesterChanged"
+                                   Dense="true"
+                                   Variant="Variant.Outlined"
+                                   Searchable="true"
+                                   Disabled="@_lookupsLoading">
+                            @foreach (var u in _users)
+                            {
+                                <MudSelectItem T="int" Value="@u.Id">@u.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int?"
+                                         @bind-Value="Model.QueueId"
+                                         Label="QueueId (opcjonalnie)"
+                                         Variant="Variant.Outlined"
+                                         Min="1" />
+                    </MudItem>
+                </MudGrid>
+
+                <MudDivider />
+
+                <MudText Typo="Typo.subtitle2">Harmonogram</MudText>
+
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudSwitch T="bool"
+                                   @bind-Value="Model.ScheduleIsEnabled"
+                                   Color="Color.Success"
+                                   Label="Aktywny harmonogram" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudDatePicker Date="@_startLocal"
+                                       DateChanged="OnStartLocalChanged"
+                                       Label="Start"
+                                       Variant="Variant.Outlined" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudDatePicker Date="@_endLocal"
+                                       DateChanged="OnEndLocalChanged"
+                                       Label="End (opcjonalnie)"
+                                       Variant="Variant.Outlined"
+                                       Clearable="true" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudTimePicker Time="@_atTimeLocal"
+                                       TimeChanged="OnAtTimeChanged"
+                                       Label="Godzina uruchomienia"
+                                       Variant="Variant.Outlined" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSelect T="byte"
+                                   Value="Model.ScheduleFrequencyType"
+                                   ValueChanged="OnFrequencyChanged"
+                                   Label="Częstotliwość"
+                                   Variant="Variant.Outlined">
+                            <MudSelectItem T="byte" Value="@((byte)ScheduleFrequencyType.Daily)">Daily</MudSelectItem>
+                            <MudSelectItem T="byte" Value="@((byte)ScheduleFrequencyType.Weekly)">Weekly</MudSelectItem>
+                            <MudSelectItem T="byte" Value="@((byte)ScheduleFrequencyType.Monthly)">Monthly</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int"
+                                         @bind-Value="Model.ScheduleIntervalValue"
+                                         Label="Co ile (interval)"
+                                         Variant="Variant.Outlined"
+                                         Min="1" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int?"
+                                         @bind-Value="Model.ScheduleDaysOfWeekMask"
+                                         Label="DaysOfWeekMask (Weekly)"
+                                         Variant="Variant.Outlined"
+                                         Min="1"
+                                         Disabled="@(!IsWeekly)" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int?"
+                                         @bind-Value="Model.ScheduleDayOfMonth"
+                                         Label="Dzień miesiąca (Monthly)"
+                                         Variant="Variant.Outlined"
+                                         Min="1"
+                                         Max="31"
+                                         Disabled="@(!IsMonthly)" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudNumericField T="int?"
+                                         @bind-Value="Model.ScheduleMonthOfYear"
+                                         Label="Miesiąc (opcjonalnie)"
+                                         Variant="Variant.Outlined"
+                                         Min="1"
+                                         Max="12"
+                                         HelperText="Zostaw puste jeśli nie używasz rocznego trybu" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSwitch T="bool"
+                                   @bind-Value="Model.ScheduleSkipWeekends"
+                                   Color="Color.Info"
+                                   Label="Skip weekends" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="4">
+                        <MudSwitch T="bool"
+                                   @bind-Value="Model.ScheduleMoveToNextBusinessDay"
+                                   Color="Color.Info"
+                                   Label="Move to next business day" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudTextField Value="@LastRunText"
+                                      Label="Ostatnie uruchomienie (UTC)"
+                                      Variant="Variant.Outlined"
+                                      Disabled="true" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudTextField Value="@NextRunText"
+                                      Label="Następne uruchomienie (UTC)"
+                                      Variant="Variant.Outlined"
+                                      Disabled="true" />
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            NextRunAt jest wyliczane przez backend i scheduler.
+                        </MudText>
+                    </MudItem>
+                </MudGrid>
+
+                <MudDivider />
+
+                <MudText Typo="Typo.subtitle2">Podgląd ticketa</MudText>
+                <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+                    <MudText Typo="Typo.subtitle2">@PreviewTitle</MudText>
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@PreviewDescription</MudText>
+                </MudPaper>
+
+            </MudStack>
+        </MudForm>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="Cancel">Anuluj</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_saving" OnClick="SaveAsync">Zapisz</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] public IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ScheduledTicketDefinitionDto Model { get; set; } = new();
+    [Parameter] public int ActorUserId { get; set; }
+
+    private MudForm? _form;
+    private bool _saving;
+    private bool _lookupsLoading = true;
+
+    private DateTime? _startLocal;
+    private DateTime? _endLocal;
+    private TimeSpan? _atTimeLocal;
+
+    private sealed record LookupInt(int Id, string Name);
+    private sealed record WeightedLookupByte(byte Id, string Name, int Weight);
+
+    private List<LookupInt> _categories = new();
+    private List<WeightedLookupByte> _impacts = new();
+    private List<WeightedLookupByte> _urgencies = new();
+    private List<LookupInt> _users = new();
+
+    private bool IsWeekly => (ScheduleFrequencyType)Model.ScheduleFrequencyType == ScheduleFrequencyType.Weekly;
+    private bool IsMonthly => (ScheduleFrequencyType)Model.ScheduleFrequencyType == ScheduleFrequencyType.Monthly;
+
+    private int? ImpactWeight => Model.Impact.HasValue ? _impacts.FirstOrDefault(x => x.Id == Model.Impact.Value)?.Weight : null;
+    private int? UrgencyWeight => Model.Urgency.HasValue ? _urgencies.FirstOrDefault(x => x.Id == Model.Urgency.Value)?.Weight : null;
+
+    private int? Score => (ImpactWeight.HasValue && UrgencyWeight.HasValue)
+        ? ImpactWeight.Value * UrgencyWeight.Value
+        : null;
+
+    private string ScoreText => Score?.ToString() ?? "-";
+
+    private string PreviewTitle => "[OKRESOWE] " + Render(Model.TitleTemplate ?? string.Empty);
+    private string PreviewDescription => string.IsNullOrWhiteSpace(Model.DescriptionTemplate) ? "-" : Render(Model.DescriptionTemplate!);
+
+    private string LastRunText => Model.ScheduleLastRunAtUtc.HasValue
+        ? Model.ScheduleLastRunAtUtc.Value.ToString("yyyy-MM-dd HH:mm:ss")
+        : "-";
+
+    private string NextRunText => Model.ScheduleNextRunAtUtc.HasValue
+        ? Model.ScheduleNextRunAtUtc.Value.ToString("yyyy-MM-dd HH:mm:ss")
+        : "-";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        var canManage = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Tickets.Scheduler.Manage");
+        if (!canManage)
+        {
+            MudDialog.Cancel();
+            return;
+        }
+
+        await LoadLookupsAsync();
+
+        if (Model.RequesterUserId <= 0)
+            Model.RequesterUserId = (ctx.UserId ?? ActorUserId);
+
+        if (Model.ScheduleIntervalValue <= 0)
+            Model.ScheduleIntervalValue = 1;
+
+        if (string.IsNullOrWhiteSpace(Model.ScheduleTimeZoneId))
+            Model.ScheduleTimeZoneId = TimeZoneInfo.Local.Id;
+
+        if (Model.ScheduleAtTime == default)
+            Model.ScheduleAtTime = new TimeSpan(8, 0, 0);
+
+        // Inicjalizacja pól UI z UTC -> lokalny (wg ScheduleTimeZoneId)
+        _startLocal = ToLocalDate(Model.ScheduleStartAtUtc);
+        _endLocal = Model.ScheduleEndAtUtc.HasValue ? ToLocalDate(Model.ScheduleEndAtUtc.Value) : null;
+        _atTimeLocal = Model.ScheduleAtTime;
+
+        EnsureFrequencyDefaults();
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        try
+        {
+            _lookupsLoading = true;
+
+            var categories = await SchedulerLookups.GetTicketCategoriesAsync();
+            var impacts = await SchedulerLookups.GetTicketImpactsWeightedAsync();
+            var urgencies = await SchedulerLookups.GetTicketUrgenciesWeightedAsync();
+            var users = await SchedulerLookups.GetAssignableUsersAsync();
+
+            _categories = categories.Select(x => new LookupInt(x.Id, x.Name)).ToList();
+            _impacts = impacts.Select(x => new WeightedLookupByte(x.Id, x.Name, x.Weight)).ToList();
+            _urgencies = urgencies.Select(x => new WeightedLookupByte(x.Id, x.Name, x.Weight)).ToList();
+            _users = users.Select(x => new LookupInt(x.Id, x.Name)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Nie udało się wczytać słowników: {ex.Message}", Severity.Error);
+            _categories = new();
+            _impacts = new();
+            _urgencies = new();
+            _users = new();
+        }
+        finally
+        {
+            _lookupsLoading = false;
+        }
+    }
+
+    private Task OnCategoryChanged(int? v) { Model.CategoryId = v; return Task.CompletedTask; }
+
+    private Task OnImpactChanged(byte? v) { Model.Impact = v; return Task.CompletedTask; }
+
+    private Task OnUrgencyChanged(byte? v) { Model.Urgency = v; return Task.CompletedTask; }
+
+    private Task OnRequesterChanged(int v) { Model.RequesterUserId = v; return Task.CompletedTask; }
+
+    private Task OnStartLocalChanged(DateTime? v) { _startLocal = v; return Task.CompletedTask; }
+
+    private Task OnEndLocalChanged(DateTime? v) { _endLocal = v; return Task.CompletedTask; }
+
+    private Task OnAtTimeChanged(TimeSpan? v) { _atTimeLocal = v; return Task.CompletedTask; }
+
+    private Task OnFrequencyChanged(byte v)
+    {
+        Model.ScheduleFrequencyType = v;
+        EnsureFrequencyDefaults();
+        return Task.CompletedTask;
+    }
+
+    private void EnsureFrequencyDefaults()
+    {
+        var ft = (ScheduleFrequencyType)Model.ScheduleFrequencyType;
+
+        if (ft == ScheduleFrequencyType.Monthly)
+        {
+            if (!Model.ScheduleDayOfMonth.HasValue || Model.ScheduleDayOfMonth.Value <= 0)
+                Model.ScheduleDayOfMonth = 1;
+        }
+
+        if (ft == ScheduleFrequencyType.Weekly)
+        {
+            if (!Model.ScheduleDaysOfWeekMask.HasValue || Model.ScheduleDaysOfWeekMask.Value <= 0)
+                Model.ScheduleDaysOfWeekMask = 1;
+        }
+
+        if (ft != ScheduleFrequencyType.Monthly) Model.ScheduleDayOfMonth = null;
+        if (ft != ScheduleFrequencyType.Weekly) Model.ScheduleDaysOfWeekMask = null;
+    }
+
+    private DateTime ToLocalDate(DateTime utc)
+    {
+        var tz = ResolveTimeZone();
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), tz);
+        return local.Date;
+    }
+
+    private TimeZoneInfo ResolveTimeZone()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(Model.ScheduleTimeZoneId))
+                return TimeZoneInfo.FindSystemTimeZoneById(Model.ScheduleTimeZoneId);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return TimeZoneInfo.Local;
+    }
+
+    private DateTime LocalDateAndTimeToUtc(DateTime localDate, TimeSpan localTime)
+    {
+        var tz = ResolveTimeZone();
+
+        // Kind Unspecified celowo, bo to "czas w strefie"
+        var local = new DateTime(localDate.Year, localDate.Month, localDate.Day, localTime.Hours, localTime.Minutes, localTime.Seconds, DateTimeKind.Unspecified);
+
+        // ConvertTimeToUtc obsłuży DST
+        return TimeZoneInfo.ConvertTimeToUtc(local, tz);
+    }
+
+    private static string Render(string input)
+    {
+        var now = DateTime.Now;
+        return (input ?? string.Empty)
+            .Replace("{Now}", now.ToString("yyyy-MM-dd HH:mm"))
+            .Replace("{Date}", now.ToString("yyyy-MM-dd"))
+            .Replace("{Year}", now.Year.ToString())
+            .Replace("{Month}", now.Month.ToString("00"))
+            .Replace("{Day}", now.Day.ToString("00"));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        if (_form is null) return;
+
+        await _form.Validate();
+        if (!_form.IsValid) return;
+
+        if (Model.ScheduleIntervalValue <= 0)
+            Model.ScheduleIntervalValue = 1;
+
+        if (string.IsNullOrWhiteSpace(Model.ScheduleTimeZoneId))
+            Model.ScheduleTimeZoneId = TimeZoneInfo.Local.Id;
+
+        var startLocal = _startLocal ?? DateTime.Today;
+        var atTime = _atTimeLocal ?? new TimeSpan(8, 0, 0);
+
+        Model.ScheduleAtTime = atTime;
+        Model.ScheduleStartAtUtc = LocalDateAndTimeToUtc(startLocal, atTime);
+
+        if (_endLocal.HasValue)
+            Model.ScheduleEndAtUtc = LocalDateAndTimeToUtc(_endLocal.Value, atTime);
+        else
+            Model.ScheduleEndAtUtc = null;
+
+        EnsureFrequencyDefaults();
+
+        try
+        {
+            _saving = true;
+
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            var actorUserId = ctx.UserId ?? ActorUserId;
+            if (actorUserId <= 0)
+            {
+                Snackbar.Add("Brak UserId w kontekście użytkownika.", Severity.Error);
+                return;
+            }
+
+            var id = await DefinitionsService.UpsertAsync(Model, actorUserId);
+            Model.DefinitionId = id;
+
+            Snackbar.Add("Zapisano zadanie cykliczne.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Błąd zapisu: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

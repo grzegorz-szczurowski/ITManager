@@ -1,0 +1,2665 @@
+﻿@page "/tickets/{Id:int}"
+@page "/tickets/{TicketCode}"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Tickets.View")]
+
+@namespace ITManager.Components.Pages.Tickets
+
+@* File: Components/Pages/Tickets/TicketEdit.razor
+   Description: Pełny ekran TicketEdit.
+                Edit mode: blokada edycji dopóki ticket nie jest przypisany do operatora (keeper) + Assign to me.
+                Create mode: Id=0 lub TicketCode="0" tworzy nowy ticket (Create.Own lub ścieżka operatorska przez Edit.*).
+                Actions: datagrid z czynnościami + przycisk Dodaj -> TicketActionDialog (tam wybór statusu).
+                RowClick: klik w wiersz otwiera modal edycji czynności.
+   Version: 1.73
+   Updated: 2026-02-09
+   Change log:
+   - 1.73 (2026-02-09) ROUTING: wczytywanie ticketa po kodzie przez TicketsService.GetTicketByCodeAsync dla linków /tickets/WAL000001.
+   - 1.72 (2026-02-09) PRIORITY: poprawka ładowania wag z metody słownikowej zwracającej Impact i Urgency razem (GetImpactAndUrgencyDictionaryAsync),
+                                 aby podgląd priorytetu w TicketEdit był zgodny z TicketsIndex.
+   - 1.71 (2026-02-09) PRIORITY UX: live preview priorytetu w UI po zmianie Impact/Urgency (bez zmian w zapisie do DB).
+   - 1.70 (2026-02-08) CREATE UX: w create mode domyślnie ustawiaj Requester na zalogowanego usera (gdy brak edycji requester).
+   - 1.69 (2026-02-07) MAIL: usunięto całą logikę powiązaną z wysyłaniem maili/powiadomień (enqueue do outbox i wywołania).
+   - 1.68 (2026-02-06) NOTIFICATIONS: enqueue do dbo.notification_outbox:
+                                     - TicketCreated po utworzeniu ticketa
+                                     - TicketStatusChanged po zmianie statusu (akcje, AssignToMe)
+                                     Payload: { TicketId }, { TicketId, NewStatusName }.
+   - 1.67 (2026-02-05) PRIORITY: wyświetlanie priorytetu wyłącznie na podstawie wartości z DB (vw_tickets.weight_priority),
+                                 bez lokalnego liczenia w UI; create mode pokazuje "-" do momentu utworzenia i odczytu z DB.
+   - 1.66 (2026-02-05) FIX: Update adapter nie wysyła NULL dla requestDate, mapuje TicketRequestDate i zachowuje ją przy zapisie.
+   - 1.65 (2026-02-05) RBAC UX: klik Zapisz bez Tickets.Edit.All lub Tickets.Edit.Assigned robi powrót (jak Cancel) zamiast zapisu.
+   - 1.64 (2026-02-05) RBAC: blokada edycji pola tytułu dla userów bez Tickets.Edit.All i Tickets.Edit.Assigned (UI + Save guard).
+   - 1.63 (2026-02-04) FIX: usuń błędny pattern na DateTime? (boxing) w GetCreatedAtUtcFromTicket + porządne klamry w CoerceToParameterType.
+   - 1.62 (2026-02-04) FIX: przy edycji i zapisie nie zeruj CreatedAt. Zachowaj datę utworzenia z bazy
+                             i podaj ją do TicketsService.UpdateTicketAsync (obiektowo oraz w adapterze parametrycznym).
+   - 1.61 (2026-02-04) CREATE: kontrakt jak w TicketsService v2.00: FirstActionText wymagany.
+                               TicketEdit nie ma pola opisu, więc wysyłamy fallback do tytułu.
+                               Adapter CreateTicketThroughAdapterAsync normalizuje puste opisy do tytułu (safety net).
+   - 1.60 (2026-02-04) ROUTING: dodano obsługę /tickets/{TicketCode} oraz nawigację po ticket_code (fallback do Id gdy brak).
+   - 1.59 (2026-02-04) CREATE: requester w TicketEdit create mode respektuje dropdown (tylko dla Tickets.Edit.All) albo fallback do zalogowanego usera jak w TicketCreateDialog. FIX: problemDescription nie bierze tytułu. UX: create mode edytowalny dla userów z Tickets.Create.Own.
+   - 1.58 (2026-02-04) UX: create mode nie zaznacza domyślnie żadnego toggle (Category/Urgency/Impact) + walidacja Category przy Create.
+   - 1.57 (2026-02-03) RBAC: usunięto Tickets.Edit.Team z TicketEdit (stałe, bramki UI, workflow perms).
+   - 1.56 (2026-02-03) RBAC: Category zablokowana w istniejących ticketach dla userów bez Tickets.Edit.Assigned i Tickets.Edit.All (UI + Save guard)
+   - 1.55 (2026-02-03) FIX: priorytet ma kolor także gdy MudToggleGroup jest Disabled (nadpisanie stylu .mud-disabled)
+   - 1.54 (2026-02-03) UX: priorytet liczony i wyświetlany jak w TicketsIndex (chip): label z resx + wynik w nawiasie, clamp 1..120, brak -> "-"
+   - 1.53 (2026-02-03) RBAC: tylko Tickets.Edit.All i Tickets.Edit.Assigned mogą zmieniać Urgency/Impact w istniejących ticketach (UI + Save guard)
+   - 1.52 (2026-02-03) RBAC UX: ukryj kolumnę Public dla userów, którzy nie są operator/admin (permissions-based)
+   - 1.51 (2026-02-02) UX: priorytet pokazuje nazwę (jak TicketsIndex) oraz iloczyn w nawiasie, zamiast P1..P5.
+   - 1.50 (2026-02-02) FIX: klik w DataGrid nie blokuje strony (TicketId przekazywany jako long do TicketActionDialog).
+                     FIX: statusy akcji pokazują stan i ewentualne przejście (from -> to) z obsługą StatusFromName/StatusToName.
+   - 1.42 (2026-02-02) Workflow: AllowedStatuses do TicketActionDialog liczone z TicketWorkflow v3 (permissions-based), bez listy "wszystkich statusów" z DB
+   - 1.43 (2026-02-02) FIX: kompatybilność z różnymi wersjami TicketsService (brak pól i overloadów) przez adaptery reflection
+   - 1.44 (2026-02-02) FIX: lookupi userów podłączone do UsersService v1.16 (GetActiveUserDisplayNamesAsync + GetOperatorDisplayNamesAsync)
+   - 1.45 (2026-02-02) UX: ukryj "Przypisz do mnie" dla userów bez uprawnień, pokaż info że zgłoszenie jest w kolejce i nie ma operatora
+   - 1.46 (2026-02-02) UX: przeniesienie akcji (Zapisz/Utwórz + Anuluj) na dół ekranu (sticky footer)
+   - 1.47 (2026-02-02) UX: usunięcie pola "Opis" (ProblemDescription) z formularza
+   - 1.48 (2026-02-02) FIX: blokada edycji pól i akcji do momentu przypisania operatora (spójne z blokadą Save)
+*@
+
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+@using ITManager.Services.Tickets
+@using MudBlazor
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using Microsoft.AspNetCore.Authorization
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using System.Reflection
+
+@inject TicketsService TicketsService
+@inject UsersService UsersService
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IStringLocalizer<TicketEdit> L
+@inject TimeZoneService TimeZoneService
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    @if (_loading)
+    {
+        <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+    }
+    else if (!_canViewModule)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+            @L["NoPermissionView"]
+        </MudAlert>
+    }
+    else if (_isCreateMode && !_canCreateMode)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+            @L["NoPermissionCreate"]
+        </MudAlert>
+    }
+    else if (!_isCreateMode && !_canViewThisTicket)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+            @L["NoPermissionView"]
+        </MudAlert>
+    }
+    else if (!_isCreateMode && _ticket is null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+            @L["TicketNotFound"]
+        </MudAlert>
+    }
+    else
+    {
+        <MudStack Spacing="2">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+                <MudStack Spacing="0" AlignItems="AlignItems.Start">
+                    <MudText Typo="Typo.h5">
+                        @(_isCreateMode? L["NewTicketHeaderTitle"].Value : (_ticket!.TicketTitle ?? string.Empty))
+                    </MudText>
+
+                    @if (_isCreateMode)
+                    {
+                        <MudText Typo="Typo.subtitle2" Style="opacity:0.75;">
+                            @L["CreateModeSubtitle"]
+                        </MudText>
+                    }
+                </MudStack>
+
+                @if (!_isCreateMode)
+                {
+                    <MudText Typo="Typo.subtitle1" Style="opacity:0.85; font-weight:600;">
+                        @TicketNumberDisplay
+                    </MudText>
+                }
+
+            </MudStack>
+
+            @if (!_isCreateMode && _showAssignHint)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="pa-3 assign-alert">
+                    @if (_canAssign)
+                    {
+                        <div class="assign-hint-row">
+                            <MudText Typo="Typo.body2" Class="assign-hint-text">
+                                @L["AssignHintText"]
+                            </MudText>
+
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Info"
+                                       StartIcon="@Icons.Material.Filled.PersonAdd"
+                                       Disabled="@(!_canAssign || _busy)"
+                                       OnClick="AssignToMeAsync"
+                                       Class="assign-hint-btn">
+                                @L["AssignToMeButton"]
+                            </MudButton>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="0">
+                            <MudText Typo="Typo.body2" Style="font-weight:700;">
+                                @LocalizeOrDefault("QueueInfoTitle", "Zgłoszenie jest w kolejce")
+                            </MudText>
+                            <MudText Typo="Typo.caption" Style="opacity:0.85; line-height:1.35;">
+                                @LocalizeOrDefault("QueueInfoText", "To zgłoszenie nie ma jeszcze przypisanego operatora. Zostanie podjęte, gdy ktoś z IT je przypisze.")
+                            </MudText>
+                        </MudStack>
+                    }
+
+                </MudAlert>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_loadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                    @_loadError
+                </MudAlert>
+            }
+
+            <MudGrid GutterSize="3">
+
+                <MudItem xs="12" md="4">
+                    <MudPaper Elevation="0" Outlined="true" Class="pa-3">
+                        <MudStack Spacing="2">
+
+                            <MudStack Spacing="1" Class="category-block">
+                                <MudText Typo="Typo.subtitle2">@L["CategoryTitle"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                @bind-Value="_selectedCategory"
+                                                Disabled="@(!_canEditForm || (_disableCategoryEdits && !_isCreateMode) || _busy)"
+                                                Class="segmented-toggle segmented-toggle-sm"
+                                                FullWidth="true">
+                                    @foreach (var c in _categoryOptions)
+                                    {
+                                        <MudToggleItem Value="@c">
+                                            <span>@GetCategoryLabel(c)</span>
+                                        </MudToggleItem>
+                                    }
+                                </MudToggleGroup>
+
+                                @if (_isCreateMode && _submitAttempted && !IsCategoryValid())
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">
+                                        @LocalizeOrDefault("CategoryRequired", "Wybierz kategorię zgłoszenia.")
+                                    </MudText>
+                                }
+
+                                @if (!_isCreateMode && _canEditForm && _disableCategoryEdits)
+                                {
+                                    <MudText Typo="Typo.caption" Style="opacity:0.75;">
+                                        @LocalizeOrDefault("CategoryEditRestrictedHint", "Zmiana kategorii jest ograniczona do operatorów z uprawnieniami Assigned lub All.")
+                                    </MudText>
+                                }
+                            </MudStack>
+
+                            <MudDivider />
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["UrgencyTitle"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                Value="@_selectedUrgency"
+                                                ValueChanged="OnUrgencyChanged"
+                                                Disabled="@(!_canEditForm || (_disableUrgencyImpactEdits && !_isCreateMode) || _busy)"
+                                                Class="segmented-toggle"
+                                                FullWidth="true">
+                                    @foreach (var u in _urgencyOptions)
+                                    {
+                                        var css = GetSeverityToggleClass(u);
+
+                                        <MudToggleItem Value="@u" Class="@css">
+                                            <span>@LevelLabel(u)</span>
+                                        </MudToggleItem>
+                                    }
+                                </MudToggleGroup>
+
+                                <MudText Typo="Typo.caption" Class="toggle-desc">
+                                    @GetUrgencyDescriptionOrHint()
+                                </MudText>
+
+                                @if (!_isCreateMode && _canEditForm && _disableUrgencyImpactEdits)
+                                {
+                                    <MudText Typo="Typo.caption" Style="opacity:0.75;">
+                                        @LocalizeOrDefault("UrgencyImpactEditRestrictedHint", "Zmiana pilności i wpływu jest ograniczona do operatorów z uprawnieniami Assigned lub All.")
+                                    </MudText>
+                                }
+                            </MudStack>
+
+                            <MudDivider />
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["ImpactTitle"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                Value="@_selectedImpact"
+                                                ValueChanged="OnImpactChanged"
+                                                Disabled="@(!_canEditForm || (_disableUrgencyImpactEdits && !_isCreateMode) || _busy)"
+                                                Class="segmented-toggle"
+                                                FullWidth="true">
+                                    @foreach (var i in _impactOptions)
+                                    {
+                                        var css = GetSeverityToggleClass(i);
+
+                                        <MudToggleItem Value="@i" Class="@css">
+                                            <span>@LevelLabel(i)</span>
+                                        </MudToggleItem>
+                                    }
+                                </MudToggleGroup>
+
+                                <MudText Typo="Typo.caption" Class="toggle-desc">
+                                    @GetImpactDescriptionOrHint()
+                                </MudText>
+                            </MudStack>
+
+                            <MudDivider />
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["PriorityTitle"]</MudText>
+
+                                <MudToggleGroup T="string"
+                                                Exclusive="true"
+                                                Value="@PriorityDisplayText"
+                                                Disabled="true"
+                                                Class="priority-toggle"
+                                                FullWidth="true">
+                                    <MudToggleItem Value="@PriorityDisplayText" Class="@GetPriorityToggleClass()">
+                                        <span>@PriorityDisplayText</span>
+                                    </MudToggleItem>
+                                </MudToggleGroup>
+                            </MudStack>
+
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="8">
+                    <MudPaper Elevation="0" Outlined="true" Class="pa-3">
+                        <MudStack Spacing="2">
+
+                            <MudGrid GutterSize="2">
+                                <MudItem xs="12" md="6">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@($"{L["RequesterTitle"]}")</MudText>
+
+                                        <MudAutocomplete T="string"
+                                                         @bind-Value="_requesterName"
+                                                         Dense="true"
+                                                         Margin="Margin.Dense"
+                                                         Variant="Variant.Text"
+                                                         Disabled="@(!_canEditForm || !_canEditRequester || _busy)"
+                                                         SearchFunc="SearchRequesterAsync"
+                                                         ToStringFunc="@(x => x)"
+                                                         Clearable="true"
+                                                         CoerceText="true"
+                                                         CoerceValue="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MinCharacters="0"
+                                                         MaxItems="50" />
+
+                                    </MudStack>
+                                </MudItem>
+
+                                <MudItem xs="12" md="6">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@($"{L["OperatorTitle"]}")</MudText>
+
+                                        <MudAutocomplete T="string"
+                                                         @bind-Value="_operatorName"
+                                                         Dense="true"
+                                                         Margin="Margin.Dense"
+                                                         Variant="Variant.Text"
+                                                         Disabled="@(!_canEditForm || !_canChangeOperator || _busy)"
+                                                         SearchFunc="SearchOperatorAsync"
+                                                         ToStringFunc="@(x => x)"
+                                                         Clearable="true"
+                                                         CoerceText="true"
+                                                         CoerceValue="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         MinCharacters="0"
+                                                         MaxItems="50" />
+                                    </MudStack>
+                                </MudItem>
+                            </MudGrid>
+
+                            <MudTextField T="string"
+                                          Label="@L["TitleLabel"]"
+                                          @bind-Value="_titleText"
+                                          Variant="Variant.Outlined"
+                                          FullWidth="true"
+                                          Dense="true"
+                                          Disabled="@(!_canEditForm || (!_isCreateMode && !_canEditTitleExisting) || _busy)"
+                                          Error="@(_submitAttempted && (_isCreateMode || _canEditTitleExisting) && !IsTitleValid())"
+                                          ErrorText=" " />
+
+                            @if (_submitAttempted && (_isCreateMode || _canEditTitleExisting) && !IsTitleValid())
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">
+                                    @L["TitleTooShort"]
+                                </MudText>
+                            }
+
+                            @if (!_isCreateMode)
+                            {
+                                <MudDivider />
+
+                                <MudStack Spacing="2">
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                        <MudText Typo="Typo.subtitle2">@L["ActionsTitle"]</MudText>
+
+                                        <MudButton Variant="Variant.Filled"
+                                                   Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.Add"
+                                                   Disabled="@(!_canAddAction || _busy)"
+                                                   OnClick="AddActionAsync">
+                                            @L["AddButton"]
+                                        </MudButton>
+                                    </MudStack>
+
+                                    @if (_actionsLoading)
+                                    {
+                                        <MudProgressCircular Size="Size.Medium" Class="mx-auto" />
+                                    }
+                                    else
+                                    {
+                                        <MudDataGrid T="TicketsService.TicketActionRow"
+                                                     Items="@_actions"
+                                                     Dense="true"
+                                                     Hover="true"
+                                                     Elevation="0"
+                                                     Outlined="true"
+                                                     Bordered="true"
+                                                     Filterable="false"
+                                                     SortMode="SortMode.Multiple"
+                                                     RowClick="OnActionRowClickAsync"
+                                                     RowClassFunc="ActionRowClass">
+
+                                            <Columns>
+                                                <PropertyColumn Property="x => x.CreatedAt"
+                                                                Title="@L["GridColDate"]"
+                                                                Sortable="true"
+                                                                CellClass="actions-col-date">
+                                                    <CellTemplate>
+                                                        @FormatDateTime(context.Item.CreatedAt)
+                                                    </CellTemplate>
+                                                </PropertyColumn>
+
+                                                <PropertyColumn Property="x => x.CreatedByDisplayName"
+                                                                Title="@L["GridColAddedBy"]"
+                                                                Sortable="true"
+                                                                CellClass="actions-col-user" />
+
+                                                @if (_showPublicColumn)
+                                                {
+                                                    <PropertyColumn Property="x => x.IsPublic"
+                                                                    Title="@L["GridColPublic"]"
+                                                                    Sortable="true"
+                                                                    CellClass="actions-col-public">
+                                                        <CellTemplate>
+                                                            @if (context.Item.IsPublic)
+                                                            {
+                                                                <MudTooltip Text="@L["PublicTooltipAll"]">
+                                                                    <MudIcon Icon="@Icons.Material.Filled.Public" />
+                                                                </MudTooltip>
+                                                            }
+                                                            else
+                                                            {
+                                                                <MudTooltip Text="@L["PublicTooltipRestricted"]">
+                                                                    <MudIcon Icon="@Icons.Material.Filled.Lock" />
+                                                                </MudTooltip>
+                                                            }
+                                                        </CellTemplate>
+                                                    </PropertyColumn>
+                                                }
+
+                                                <PropertyColumn Property="x => x.ActionText"
+                                                                Title="@L["GridColDescription"]"
+                                                                Sortable="false"
+                                                                CellClass="actions-col-text" />
+
+                                                <TemplateColumn Title="@L["GridColStatus"]" CellClass="actions-col-status">
+                                                    <CellTemplate>
+                                                        @{
+                                                            var status = GetActionTargetStatusName(context.Item);
+                                                            if (string.IsNullOrWhiteSpace(status))
+                                                            {
+                                                                <MudText Typo="Typo.body2" Style="opacity:0.7;">-</MudText>
+                                                            }
+                                                            else
+                                                            {
+                                                                <MudText Typo="Typo.body2">@status</MudText>
+                                                            }
+                                                        }
+                                                    </CellTemplate>
+                                                </TemplateColumn>
+
+                                            </Columns>
+
+                                            <NoRecordsContent>
+                                                <MudText Typo="Typo.body2" Class="pa-2">
+                                                    @L["NoActions"]
+                                                </MudText>
+                                            </NoRecordsContent>
+
+                                        </MudDataGrid>
+                                    }
+
+                                </MudStack>
+                            }
+
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+            </MudGrid>
+
+            <MudDivider Class="mt-2" />
+
+            <MudPaper Elevation="0" Class="ticketedit-footer pa-2">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Spacing="1">
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Default"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               Disabled="@_busy"
+                               OnClick="BackToReturnUrl">
+                        @LocalizeOrDefault("CancelButton", "Anuluj")
+                    </MudButton>
+
+                    @if (!_isCreateMode)
+                    {
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   Disabled="@(!_canSave || _busy)"
+                                   OnClick="SaveAsync">
+                            @L["SaveButton"]
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Send"
+                                   Disabled="@(!_canCreateMode || _busy)"
+                                   OnClick="CreateAsync">
+                            @L["CreateButton"]
+                        </MudButton>
+                    }
+
+                </MudStack>
+            </MudPaper>
+
+            <MudOverlay Visible="@_busy"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Absolute="true"
+                        Class="ticketedit-overlay">
+                <MudPaper Class="pa-6 ticketedit-overlay-card">
+                    <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1">@L["Working"]</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudOverlay>
+
+        </MudStack>
+    }
+
+</MudPaper>
+
+<style>
+    .assign-alert {
+        border-radius: 10px;
+    }
+
+    .assign-hint-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .assign-hint-text {
+        opacity: 0.9;
+    }
+
+    .ticketedit-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
+        background: var(--mud-palette-surface);
+        border-radius: 10px;
+    }
+
+    .segmented-toggle .mud-toggle-item {
+        min-height: 40px;
+        font-weight: 600;
+    }
+
+    .segmented-toggle-sm .mud-toggle-item {
+        min-height: 36px;
+        font-weight: 600;
+    }
+
+    .toggle-desc {
+        opacity: 0.8;
+        line-height: 1.35;
+        margin-top: 6px;
+        min-height: 38px;
+    }
+
+    .priority-toggle .mud-toggle-item {
+        min-height: 44px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+    }
+
+    .sev-critical {
+        background-color: rgba(211, 47, 47, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-high {
+        background-color: rgba(245, 124, 0, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-medium {
+        background-color: rgba(249, 168, 37, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-low {
+        background-color: rgba(46, 125, 50, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .sev-info {
+        background-color: rgba(2, 136, 209, 0.15);
+        border: 1px solid #0288D1;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-critical.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-critical.mud-toggle-item-selected {
+        background-color: #D32F2F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-high.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-high.mud-toggle-item-selected {
+        background-color: #F57C00 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-medium.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-medium.mud-toggle-item-selected {
+        background-color: #F9A825 !important;
+        color: #111111 !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-low.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-low.mud-toggle-item-selected {
+        background-color: #2E7D32 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.sev-info.mud-selected,
+    .segmented-toggle .mud-toggle-item.sev-info.mud-toggle-item-selected {
+        background-color: #0288D1 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .segmented-toggle .mud-toggle-item.mud-selected:hover,
+    .segmented-toggle .mud-toggle-item.mud-toggle-item-selected:hover {
+        filter: brightness(1.02);
+    }
+
+    .prio-critical {
+        background-color: #D32F2F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .prio-veryhigh {
+        background-color: #F57C00 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .prio-high {
+        background-color: #F9A825 !important;
+        color: #111111 !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .prio-medium {
+        background-color: #2E7D32 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .prio-low {
+        background-color: #0288D1 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .prio-none {
+        background-color: #607D8B !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-critical,
+    .priority-toggle .mud-toggle-item.prio-critical.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-critical.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-critical.mud-toggle-item-selected {
+        background-color: #D32F2F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-veryhigh,
+    .priority-toggle .mud-toggle-item.prio-veryhigh.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-veryhigh.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-veryhigh.mud-toggle-item-selected {
+        background-color: #F57C00 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-high,
+    .priority-toggle .mud-toggle-item.prio-high.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-high.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-high.mud-toggle-item-selected {
+        background-color: #F9A825 !important;
+        color: #111111 !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-medium,
+    .priority-toggle .mud-toggle-item.prio-medium.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-medium.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-medium.mud-toggle-item-selected {
+        background-color: #2E7D32 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-low,
+    .priority-toggle .mud-toggle-item.prio-low.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-low.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-low.mud-toggle-item-selected {
+        background-color: #0288D1 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-none,
+    .priority-toggle .mud-toggle-item.prio-none.mud-disabled,
+    .priority-toggle .mud-toggle-item.prio-none.mud-selected,
+    .priority-toggle .mud-toggle-item.prio-none.mud-toggle-item-selected {
+        background-color: #607D8B !important;
+        color: #FFFFFF !important;
+        border: 1px solid #0288D1 !important;
+        opacity: 1 !important;
+    }
+
+    .priority-toggle .mud-toggle-item.prio-critical *,
+    .priority-toggle .mud-toggle-item.prio-veryhigh *,
+    .priority-toggle .mud-toggle-item.prio-high *,
+    .priority-toggle .mud-toggle-item.prio-medium *,
+    .priority-toggle .mud-toggle-item.prio-low *,
+    .priority-toggle .mud-toggle-item.prio-none * {
+        color: inherit !important;
+    }
+
+    .actions-col-date {
+        width: 160px;
+        white-space: nowrap;
+    }
+
+    .actions-col-user {
+        width: 210px;
+    }
+
+    .actions-col-public {
+        width: 90px;
+        text-align: center;
+    }
+
+    .actions-col-status {
+        width: 160px;
+    }
+
+    .actions-col-text {
+        width: auto;
+    }
+
+    .action-row-clickable:hover {
+        background-color: rgba(2, 136, 209, 0.10);
+        cursor: pointer;
+    }
+
+    .ticketedit-overlay {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .ticketedit-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+</style>
+
+@code
+{
+    [Parameter] public int Id { get; set; }
+
+    [Parameter] public string? TicketCode { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private const string PermViewOwn = "Tickets.View.Own";
+    private const string PermViewAssigned = "Tickets.View.Assigned";
+    private const string PermViewTeam = "Tickets.View.Team";
+
+    private const string PermCreateOwn = "Tickets.Create.Own";
+
+    private const string PermEditOwn = "Tickets.Edit.Own";
+    private const string PermEditAssigned = "Tickets.Edit.Assigned";
+    private const string PermEditAll = "Tickets.Edit.All";
+
+    private const string PermAssignTeam = "Tickets.Assign.Team";
+
+    private const string LevelEmergency = "Emergency";
+    private const string LevelCritical = "Critical";
+    private const string LevelHigh = "High";
+    private const string LevelMedium = "Medium";
+    private const string LevelLow = "Low";
+    private const string LevelInfo = "Info";
+
+    private const string PriorityEmergency = "Emergency";
+    private const string PriorityCritical = "Critical";
+    private const string PriorityVeryHigh = "Very High";
+    private const string PriorityHigh = "High";
+    private const string PriorityMedium = "Medium";
+    private const string PriorityLow = "Low";
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _submitAttempted;
+
+    private bool _isCreateMode => IsCreateModeRoute();
+
+    private bool _canViewModule;
+    private bool _canViewThisTicket;
+
+    private bool _canCreateMode;
+    private bool _canEdit;
+    private bool _canSave;
+
+    private bool _canAssign;
+    private bool _showAssignHint;
+
+    private bool _canEditRequester;
+    private bool _canChangeOperator;
+    private bool _canAddAction;
+
+    private bool _canEditForm;
+
+    private bool _canEditTitleExisting;
+
+    private string _loadError = string.Empty;
+
+    private Ticket? _ticket;
+
+    private List<TicketsService.TicketActionRow> _actions = new();
+    private bool _actionsLoading;
+
+    private bool _canSeePublicColumn;
+    private bool _showPublicColumn;
+
+    private TimeZoneInfo _userTimeZone = TimeZoneInfo.Local;
+
+    private string _returnUrl = "/tickets";
+
+    private string _selectedCategory = string.Empty;
+    private readonly List<string> _categoryOptions = new() { "User support", "IT Internal", "Project" };
+
+    private string _selectedUrgency = string.Empty;
+    private string _selectedImpact = string.Empty;
+
+    private readonly List<string> _urgencyOptions = new() { LevelLow, LevelMedium, LevelHigh, LevelCritical };
+    private readonly List<string> _impactOptions = new() { LevelInfo, LevelLow, LevelMedium, LevelHigh, LevelCritical };
+
+    private string _requesterName = string.Empty;
+    private string _operatorName = string.Empty;
+
+    private string _titleText = string.Empty;
+
+    private string _problemDescription = string.Empty;
+
+    private DateTime? _createdAtUtc;
+
+    private DateTime? _requestDateUtc;
+
+    // PRIORITY (live preview)
+    private readonly Dictionary<string, int> _urgencyWeights = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _impactWeights = new(StringComparer.OrdinalIgnoreCase);
+    private bool _priorityWeightsLoaded;
+    private int _priorityPreviewScore;
+    private bool _hasPriorityPreviewScore;
+    private string _originalUrgency = string.Empty;
+    private string _originalImpact = string.Empty;
+
+    private string PriorityDisplayText => GetPriorityDisplayText();
+
+    private bool _canEditUrgencyImpactExisting;
+    private bool _canEditCategoryExisting;
+
+    private bool _disableUrgencyImpactEdits => !_canEditUrgencyImpactExisting;
+    private bool _disableCategoryEdits => !_canEditCategoryExisting;
+
+    private string TicketNumberDisplay => BuildTicketNumberDisplay();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _returnUrl = NormalizeReturnUrl(ReturnUrl);
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        bool HasAny(params string[] perms)
+            => perms != null && perms.Any(p => !string.IsNullOrWhiteSpace(p) && ctx.Has(p));
+
+        var canViewAnyByViewPerms = HasAny(PermViewOwn, PermViewAssigned, PermViewTeam);
+        var canViewAnyByEditPerms = HasAny(PermEditOwn, PermEditAssigned, PermEditAll);
+        var canViewAnyByAssignPerms = HasAny(PermAssignTeam);
+
+        _canViewModule = ctx.IsAuthenticated && ctx.IsActive == true && (canViewAnyByViewPerms || canViewAnyByEditPerms || canViewAnyByAssignPerms);
+
+        _canCreateMode = ctx.IsAuthenticated && ctx.IsActive == true && (ctx.Has(PermCreateOwn) || canViewAnyByEditPerms);
+
+        _canAssign = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(PermAssignTeam, PermEditAll);
+
+        _canEdit = ctx.IsAuthenticated && ctx.IsActive == true && canViewAnyByEditPerms;
+
+        _canEditRequester = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(PermEditAll);
+        _canChangeOperator = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(PermAssignTeam, PermEditAll);
+
+        _canAddAction = _canEdit;
+
+        _canSeePublicColumn = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(
+            PermAssignTeam,
+            PermEditAssigned,
+            PermEditAll
+        );
+
+        _canEditUrgencyImpactExisting = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(PermEditAll, PermEditAssigned);
+        _canEditCategoryExisting = _canEditUrgencyImpactExisting;
+
+        _canEditTitleExisting = ctx.IsAuthenticated && ctx.IsActive == true && HasAny(PermEditAll, PermEditAssigned);
+
+        if (!_canViewModule)
+        {
+            _loading = false;
+            return;
+        }
+
+        _userTimeZone = await TimeZoneService.GetUserTimeZoneAsync();
+
+        // PRIORITY: załaduj wagi do live preview (best-effort, bez wpływu na zapis)
+        await LoadPriorityWeightsSafeAsync();
+
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private bool IsCreateModeRoute()
+    {
+        if (Id > 0)
+            return false;
+
+        var tc = (TicketCode ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(tc))
+            return true;
+
+        if (string.Equals(tc, "0", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.Equals(tc, "new", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private string BuildTicketNumberDisplay()
+    {
+        if (_ticket is null)
+            return string.Empty;
+
+        var code = GetTicketCodeFromTicket(_ticket);
+        if (!string.IsNullOrWhiteSpace(code))
+            return $"#{code}";
+
+        return $"#{_ticket.Id}";
+    }
+
+    private string GetTicketCodeFromTicket(Ticket ticket)
+    {
+        try
+        {
+            var t = ticket.GetType();
+
+            var p = t.GetProperty("TicketCode", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("ticket_code", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            var val = p?.GetValue(ticket);
+            var s = (val?.ToString() ?? string.Empty).Trim();
+
+            return s;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private string LocalizeOrDefault(string key, string fallbackPl)
+    {
+        var localized = L[key];
+        if (localized is null)
+            return fallbackPl;
+
+        var val = localized.Value ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(val))
+            return fallbackPl;
+
+        if (string.Equals(val, key, StringComparison.Ordinal))
+            return fallbackPl;
+
+        return val;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadError = string.Empty;
+
+        if (_isCreateMode)
+        {
+            _canViewThisTicket = true;
+
+            _selectedCategory = string.Empty;
+            _selectedUrgency = string.Empty;
+            _selectedImpact = string.Empty;
+
+            _originalUrgency = string.Empty;
+            _originalImpact = string.Empty;
+            RecalculatePriorityPreview();
+
+            _operatorName = string.Empty;
+            _titleText = string.Empty;
+            _problemDescription = string.Empty;
+
+            var currentDisplayName = GetCurrentUserDisplayNameSafe();
+            _requesterName = _canEditRequester ? string.Empty : currentDisplayName;
+
+            _ticket = new Ticket();
+            _createdAtUtc = null;
+            _requestDateUtc = null;
+
+            _showAssignHint = false;
+
+            _canEditForm = _canCreateMode;
+
+            _canAddAction = false;
+            _canSave = false;
+
+            return;
+        }
+
+        try
+        {
+            _ticket = await LoadTicketByRouteAsync();
+            _canViewThisTicket = _ticket is not null;
+
+            if (_ticket is null)
+                return;
+
+            _createdAtUtc = GetCreatedAtUtcFromTicket(_ticket);
+
+            _requestDateUtc = _ticket.TicketRequestDate.HasValue ? EnsureUtc(_ticket.TicketRequestDate.Value) : null;
+
+            _selectedCategory = NormalizeCategory(_ticket.TicketCategoryName);
+            _selectedUrgency = NormalizeLevel(_ticket.TicketUrgencyName);
+            _selectedImpact = NormalizeLevel(_ticket.TicketImpactName);
+
+            // PRIORITY: zapamiętaj wartości bazowe dla detekcji zmiany i live preview
+            _originalUrgency = _selectedUrgency;
+            _originalImpact = _selectedImpact;
+            RecalculatePriorityPreview();
+
+            _requesterName = (_ticket.TicketRequesterName ?? string.Empty).Trim();
+            _operatorName = (_ticket.TicketOperatorName ?? string.Empty).Trim();
+
+            _titleText = (_ticket.TicketTitle ?? string.Empty).Trim();
+            _problemDescription = (_ticket.ProblemDescription ?? string.Empty).Trim();
+
+            _showAssignHint = string.IsNullOrWhiteSpace(_operatorName);
+
+            _canSave = _canEdit && !_showAssignHint;
+            _canEditForm = _canEdit && !_showAssignHint;
+            _canAddAction = _canEditForm;
+
+            await LoadActionsAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _canViewThisTicket = false;
+            _ticket = null;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.LoadAsync] ERROR: {ex}");
+            _loadError = L["LoadErrorGeneric"];
+            _ticket = null;
+        }
+    }
+
+    private string GetCurrentUserDisplayNameSafe()
+    {
+        try
+        {
+            var ctx = CurrentUserContextService.CurrentUser;
+            var t = ctx.GetType();
+
+            var p = t.GetProperty("DisplayName", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("UserDisplayName", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            var val = p?.GetValue(ctx);
+            var s = (val?.ToString() ?? string.Empty).Trim();
+
+            return string.IsNullOrWhiteSpace(s) ? string.Empty : s;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private async Task<Ticket?> LoadTicketByRouteAsync()
+    {
+        var tc = (TicketCode ?? string.Empty).Trim();
+
+        // Preferuj ticket_code (np. WAL000001) dla route /tickets/{TicketCode} gdy nie jest to create mode.
+        if (!string.IsNullOrWhiteSpace(tc) && !IsCreateModeRoute())
+        {
+            return await TicketsService.GetTicketByCodeAsync(tc);
+        }
+
+        if (Id > 0)
+            return await TicketsService.GetTicketByIdAsync(Id);
+
+        if (!string.IsNullOrWhiteSpace(tc) && int.TryParse(tc, out var asId) && asId > 0)
+            return await TicketsService.GetTicketByIdAsync(asId);
+
+        return null;
+    }
+
+    private async Task<Ticket?> GetTicketByCodeThroughAdapterAsync(string ticketCode)
+    {
+        var svc = (object)TicketsService;
+        var t = svc.GetType();
+
+        var methods = t.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(m =>
+                string.Equals(m.Name, "GetTicketByCodeAsync", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, "GetTicketByTicketCodeAsync", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, "GetTicketByCode", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, "GetTicketByTicketCode", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var mi in methods.OrderByDescending(m => m.GetParameters().Length))
+        {
+            var ps = mi.GetParameters();
+            if (ps.Length < 1)
+                continue;
+
+            if (ps[0].ParameterType != typeof(string))
+                continue;
+
+            var resObj = mi.Invoke(svc, new object?[] { ticketCode });
+
+            if (resObj is Task<Ticket?> tTicket)
+                return await tTicket;
+
+            if (resObj is Task<Ticket> tTicket2)
+                return await tTicket2;
+
+            if (resObj is Task task)
+            {
+                await task;
+                return null;
+            }
+
+            if (resObj is Ticket direct)
+                return direct;
+        }
+
+        return null;
+    }
+
+    private async Task LoadActionsAsync()
+    {
+        if (_ticket is null)
+            return;
+
+        _actionsLoading = true;
+
+        try
+        {
+            _actions = await TicketsService.GetTicketActionsAsync(_ticket.Id) ?? new List<TicketsService.TicketActionRow>();
+            _showPublicColumn = _canSeePublicColumn;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _actions = new();
+            _showPublicColumn = false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.LoadActionsAsync] ERROR: {ex}");
+            _actions = new();
+            _showPublicColumn = false;
+        }
+        finally
+        {
+            _actionsLoading = false;
+        }
+    }
+
+    private async Task AssignToMeAsync()
+    {
+        if (_ticket is null)
+            return;
+
+        if (!_canAssign)
+        {
+            Snackbar.Add(L["NoPermissionAssign"], Severity.Warning);
+            return;
+        }
+
+        if (_busy)
+            return;
+
+        _busy = true;
+
+        try
+        {
+            await TicketsService.AssignTicketToCurrentUserAsync(_ticket.Id);
+
+            Snackbar.Add(L["AssignedToMeSuccess"], Severity.Success);
+
+            await LoadAsync();
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoPermissionAssign"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.AssignToMeAsync] ERROR: {ex}");
+            Snackbar.Add(string.Format(L["AssignError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_ticket is null)
+            return;
+
+        if (_busy)
+            return;
+
+        if (!_isCreateMode && !_canEditTitleExisting)
+        {
+            BackToReturnUrl();
+            return;
+        }
+
+        if (!_canSave)
+        {
+            Snackbar.Add(L["NoPermissionEdit"], Severity.Warning);
+            return;
+        }
+
+        _submitAttempted = true;
+
+        var shouldValidateTitle = _isCreateMode || _canEditTitleExisting;
+
+        if (shouldValidateTitle && !IsTitleValid())
+        {
+            Snackbar.Add(L["FormInvalidWarning"], Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            if (_isCreateMode || _canEditTitleExisting)
+            {
+                _ticket.TicketTitle = _titleText.Trim();
+            }
+
+            if (_isCreateMode || _canEditCategoryExisting)
+            {
+                _ticket.TicketCategoryName = _selectedCategory.Trim();
+            }
+
+            if (_isCreateMode || _canEditUrgencyImpactExisting)
+            {
+                _ticket.TicketUrgencyName = _selectedUrgency.Trim();
+                _ticket.TicketImpactName = _selectedImpact.Trim();
+            }
+
+            _ticket.TicketRequesterName = (_requesterName ?? string.Empty).Trim();
+            _ticket.TicketOperatorName = (_operatorName ?? string.Empty).Trim();
+
+            EnsureCreatedAtOnTicket(_ticket);
+            EnsureRequestDateOnTicket(_ticket);
+
+            await UpdateTicketThroughAdapterAsync(_ticket);
+
+            Snackbar.Add(L["SavedSuccess"], Severity.Success);
+
+            BackToReturnUrl();
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoPermissionEdit"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.SaveAsync] ERROR: {ex}");
+            Snackbar.Add(string.Format(L["SaveError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (!_isCreateMode)
+            return;
+
+        if (!_canCreateMode)
+        {
+            Snackbar.Add(L["NoPermissionCreate"], Severity.Warning);
+            return;
+        }
+
+        if (_busy)
+            return;
+
+        _submitAttempted = true;
+
+        if (!IsTitleValid())
+        {
+            Snackbar.Add(L["FormInvalidWarning"], Severity.Warning);
+            return;
+        }
+
+        if (!IsCategoryValid())
+        {
+            Snackbar.Add(L["FormInvalidWarning"], Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedUrgency) || string.IsNullOrWhiteSpace(_selectedImpact))
+        {
+            Snackbar.Add(L["FormInvalidWarning"], Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            string? requesterToSend = null;
+
+            if (_canEditRequester)
+            {
+                var trimmed = (_requesterName ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                    requesterToSend = trimmed;
+            }
+
+            var titleTrimmed = (_titleText ?? string.Empty).Trim();
+
+            var pd = (_problemDescription ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(pd))
+                pd = titleTrimmed;
+
+            var newTicketId = await CreateTicketThroughAdapterAsync(
+                title: titleTrimmed,
+                problemDescription: pd,
+                impactName: (_selectedImpact ?? string.Empty).Trim(),
+                urgencyName: (_selectedUrgency ?? string.Empty).Trim(),
+                categoryName: (_selectedCategory ?? string.Empty).Trim(),
+                requesterName: requesterToSend
+            );
+
+            var created = await TicketsService.GetTicketByIdAsync((int)newTicketId);
+            var createdCode = created is null ? string.Empty : GetTicketCodeFromTicket(created);
+
+            Snackbar.Add(string.Format(L["TicketCreatedSuccess"], !string.IsNullOrWhiteSpace(createdCode) ? createdCode : newTicketId.ToString()), Severity.Success);
+
+            await Task.Yield();
+
+            var returnUrl = Uri.EscapeDataString(_returnUrl);
+
+            if (!string.IsNullOrWhiteSpace(createdCode))
+                NavigationManager.NavigateTo($"/tickets/{Uri.EscapeDataString(createdCode)}?returnUrl={returnUrl}", replace: true);
+            else
+                NavigationManager.NavigateTo($"/tickets/{newTicketId}?returnUrl={returnUrl}", replace: true);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoPermissionCreate"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.CreateAsync] ERROR: {ex}");
+            Snackbar.Add(string.Format(L["SaveError"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<long> CreateTicketThroughAdapterAsync(
+        string title,
+        string problemDescription,
+        string impactName,
+        string urgencyName,
+        string categoryName,
+        string? requesterName)
+    {
+        title = (title ?? string.Empty).Trim();
+        problemDescription = (problemDescription ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(problemDescription))
+            problemDescription = title;
+
+        impactName = (impactName ?? string.Empty).Trim();
+        urgencyName = (urgencyName ?? string.Empty).Trim();
+        categoryName = (categoryName ?? string.Empty).Trim();
+
+        var svc = (object)TicketsService;
+        var t = svc.GetType();
+
+        var methods = t.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(m => string.Equals(m.Name, "CreateTicketAsync", StringComparison.Ordinal))
+            .ToList();
+
+        if (methods.Count == 0)
+            throw new InvalidOperationException("TicketsService.CreateTicketAsync not found.");
+
+        foreach (var mi in methods.OrderByDescending(m => m.GetParameters().Length))
+        {
+            var ps = mi.GetParameters();
+            if (ps.Length != 1)
+                continue;
+
+            var p0 = ps[0];
+            if (p0.ParameterType == typeof(string))
+                continue;
+
+            object? reqObj = null;
+
+            try { reqObj = Activator.CreateInstance(p0.ParameterType); }
+            catch { reqObj = null; }
+
+            if (reqObj is null)
+                continue;
+
+            TrySetProp(reqObj, "Title", title);
+            TrySetProp(reqObj, "TicketTitle", title);
+
+            TrySetProp(reqObj, "FirstActionText", problemDescription);
+
+            TrySetProp(reqObj, "ProblemDescription", problemDescription);
+            TrySetProp(reqObj, "Description", problemDescription);
+
+            TrySetProp(reqObj, "ImpactName", impactName);
+            TrySetProp(reqObj, "TicketImpactName", impactName);
+
+            TrySetProp(reqObj, "UrgencyName", urgencyName);
+            TrySetProp(reqObj, "TicketUrgencyName", urgencyName);
+
+            TrySetProp(reqObj, "CategoryName", categoryName);
+            TrySetProp(reqObj, "TicketCategoryName", categoryName);
+
+            if (!string.IsNullOrWhiteSpace(requesterName))
+            {
+                TrySetProp(reqObj, "RequesterDisplayName", requesterName);
+                TrySetProp(reqObj, "RequesterName", requesterName);
+                TrySetProp(reqObj, "TicketRequesterName", requesterName);
+                TrySetProp(reqObj, "CreatedByName", requesterName);
+            }
+
+            var resObj = mi.Invoke(svc, new object?[] { reqObj });
+
+            if (resObj is Task<long> tLong)
+                return await tLong;
+
+            if (resObj is Task<int> tInt)
+                return await tInt;
+
+            if (resObj is Task task)
+            {
+                await task;
+                throw new InvalidOperationException("TicketsService.CreateTicketAsync returned Task without ID.");
+            }
+        }
+
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["title"] = title,
+            ["ticketTitle"] = title,
+
+            ["problemDescription"] = problemDescription,
+            ["description"] = problemDescription,
+
+            ["impactName"] = impactName,
+            ["ticketImpactName"] = impactName,
+
+            ["urgencyName"] = urgencyName,
+            ["ticketUrgencyName"] = urgencyName,
+
+            ["categoryName"] = categoryName,
+            ["ticketCategoryName"] = categoryName,
+            ["category"] = categoryName,
+        };
+
+        if (!string.IsNullOrWhiteSpace(requesterName))
+        {
+            values["requesterName"] = requesterName;
+            values["ticketRequesterName"] = requesterName;
+            values["createdByName"] = requesterName;
+        }
+
+        foreach (var mi in methods.OrderByDescending(m => m.GetParameters().Length))
+        {
+            var ps = mi.GetParameters();
+            if (ps.Length < 4)
+                continue;
+
+            if (ps[0].ParameterType != typeof(string) ||
+                ps[1].ParameterType != typeof(string) ||
+                ps[2].ParameterType != typeof(string) ||
+                ps[3].ParameterType != typeof(string))
+            {
+                continue;
+            }
+
+            var args = new object?[ps.Length];
+            var ok = true;
+
+            for (var i = 0; i < ps.Length; i++)
+            {
+                var p = ps[i];
+                var pname = p.Name ?? string.Empty;
+
+                if (values.TryGetValue(pname, out var v))
+                {
+                    args[i] = CoerceToParameterType(v, p.ParameterType);
+                    continue;
+                }
+
+                if (p.HasDefaultValue)
+                {
+                    args[i] = p.DefaultValue;
+                    continue;
+                }
+
+                if (p.ParameterType == typeof(string))
+                {
+                    args[i] = string.Empty;
+                    continue;
+                }
+
+                if (p.ParameterType == typeof(int) || p.ParameterType == typeof(int?) ||
+                    p.ParameterType == typeof(long) || p.ParameterType == typeof(long?) ||
+                    p.ParameterType == typeof(bool) || p.ParameterType == typeof(bool?) ||
+                    p.ParameterType == typeof(DateTime) || p.ParameterType == typeof(DateTime?))
+                {
+                    args[i] = null;
+                    continue;
+                }
+
+                ok = false;
+                break;
+            }
+
+            if (!ok)
+                continue;
+
+            var resObj = mi.Invoke(svc, args);
+
+            if (resObj is Task<long> tLong)
+                return await tLong;
+
+            if (resObj is Task<int> tInt)
+                return await tInt;
+
+            if (resObj is Task task)
+            {
+                await task;
+                throw new InvalidOperationException("TicketsService.CreateTicketAsync returned Task without ID.");
+            }
+        }
+
+        throw new InvalidOperationException("No compatible overload for TicketsService.CreateTicketAsync was found.");
+    }
+
+    private static void TrySetProp(object target, string propName, object? value)
+    {
+        try
+        {
+            var t = target.GetType();
+            var p = t.GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p is null || !p.CanWrite)
+                return;
+
+            var coerced = CoerceToParameterType(value, p.PropertyType);
+            p.SetValue(target, coerced);
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task AddActionAsync()
+    {
+        if (_ticket is null)
+            return;
+
+        if (!_canAddAction)
+        {
+            Snackbar.Add(L["NoPermissionEditActions"], Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters
+        {
+            ["TicketId"] = (long)_ticket.Id,
+            ["ActionId"] = 0L,
+            ["CurrentStatusName"] = (_ticket.TicketStatusesName ?? string.Empty).Trim(),
+            ["AllowedStatuses"] = await LoadAllowedStatusesSafeAsync(),
+        };
+
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+
+        var dialog = DialogService.Show<TicketActionDialog>(L["AddActionDialogTitle"], parameters, options);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+        {
+            await LoadActionsAsync();
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnActionRowClickAsync(DataGridRowClickEventArgs<TicketsService.TicketActionRow> args)
+    {
+        if (_ticket is null || args?.Item is null)
+            return;
+
+        if (!_canAddAction)
+            return;
+
+        var row = args.Item;
+
+        var parameters = new DialogParameters
+        {
+            ["TicketId"] = (long)_ticket.Id,
+            ["ActionId"] = row.Id,
+            ["CurrentStatusName"] = (_ticket.TicketStatusesName ?? string.Empty).Trim(),
+            ["AllowedStatuses"] = await LoadAllowedStatusesSafeAsync(),
+            ["ExistingActionText"] = row.ActionText,
+            ["ExistingIsPublic"] = row.IsPublic,
+            ["ExistingTargetStatusName"] = GetActionTargetStatusName(row),
+            ["ExistingWaitingReasonCode"] = GetActionWaitingReasonCode(row)
+        };
+
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+
+        var dialog = DialogService.Show<TicketActionDialog>(L["EditActionDialogTitle"], parameters, options);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+        {
+            await LoadActionsAsync();
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string ActionRowClass(TicketsService.TicketActionRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+        return _canAddAction ? "action-row-clickable" : string.Empty;
+    }
+
+    private Task<List<string>> LoadAllowedStatusesSafeAsync()
+    {
+        try
+        {
+            if (_ticket is null)
+                return Task.FromResult(new List<string>());
+
+            var currentStatusName = (_ticket.TicketStatusesName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(currentStatusName))
+                return Task.FromResult(new List<string>());
+
+            var currentStatus = TicketWorkflow.MapFromDbStatusName(currentStatusName);
+
+            var ctx = CurrentUserContextService.CurrentUser;
+            var permBag = new List<string>(8);
+
+            if (ctx.Has(PermEditAll)) permBag.Add(PermEditAll);
+            if (ctx.Has(PermEditAssigned)) permBag.Add(PermEditAssigned);
+            if (ctx.Has(PermAssignTeam)) permBag.Add(PermAssignTeam);
+
+            var role = TicketWorkflow.MapFromPermissions(permBag);
+
+            var allowedTargets = TicketWorkflow.GetAllowedTargets(
+                currentStatus: currentStatus,
+                role: role,
+                now: DateTime.UtcNow,
+                closedOrResolvedAtUtcOrLocal: null
+            );
+
+            var allowedDbNames = allowedTargets
+                .Select(TicketWorkflow.ToDbStatusName)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return Task.FromResult(allowedDbNames);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.LoadAllowedStatusesSafeAsync] ERROR: {ex}");
+            return Task.FromResult(new List<string>());
+        }
+    }
+
+    private string GetCategoryLabel(string category)
+    {
+        var c = (category ?? string.Empty).Trim();
+
+        var key = c switch
+        {
+            "User support" => "Category.UserSupport",
+            "IT Internal" => "Category.ITInternal",
+            "Project" => "Category.Project",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(key))
+            return c;
+
+        var localized = L[key];
+        return string.Equals(localized.Value, key, StringComparison.Ordinal) ? c : localized.Value;
+    }
+
+    private string LevelLabel(string code)
+    {
+        var c = NormalizeLevel(code);
+        var key = $"Level_{c}";
+        var text = L[key];
+        return string.IsNullOrWhiteSpace(text) ? c : text;
+    }
+
+    private string GetUrgencyDescriptionOrHint()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedUrgency))
+            return L["SelectUrgencyHint"];
+
+        var key = GetUrgencyDescriptionKey(_selectedUrgency);
+        return string.IsNullOrWhiteSpace(key) ? string.Empty : L[key];
+    }
+
+    private string GetImpactDescriptionOrHint()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedImpact))
+            return L["SelectImpactHint"];
+
+        var key = GetImpactDescriptionKey(_selectedImpact);
+        return string.IsNullOrWhiteSpace(key) ? string.Empty : L[key];
+    }
+
+    private static string GetUrgencyDescriptionKey(string? name) => NormalizeLevel(name) switch
+    {
+        LevelCritical => "UrgencyDescCritical",
+        LevelHigh => "UrgencyDescHigh",
+        LevelMedium => "UrgencyDescMedium",
+        LevelLow => "UrgencyDescLow",
+        _ => string.Empty
+    };
+
+    private static string GetImpactDescriptionKey(string? name) => NormalizeLevel(name) switch
+    {
+        LevelCritical => "ImpactDescCritical",
+        LevelHigh => "ImpactDescHigh",
+        LevelMedium => "ImpactDescMedium",
+        LevelLow => "ImpactDescLow",
+        LevelInfo => "ImpactDescInfo",
+        _ => string.Empty
+    };
+
+    private string GetSeverityToggleClass(string level)
+    {
+        var l = NormalizeLevel(level);
+
+        return l switch
+        {
+            LevelCritical => "sev-critical",
+            LevelHigh => "sev-high",
+            LevelMedium => "sev-medium",
+            LevelLow => "sev-low",
+            LevelInfo => "sev-info",
+            _ => "sev-info"
+        };
+    }
+
+    private async Task OnUrgencyChanged(string value)
+    {
+        _selectedUrgency = NormalizeLevel(value);
+        RecalculatePriorityPreview();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnImpactChanged(string value)
+    {
+        _selectedImpact = NormalizeLevel(value);
+        RecalculatePriorityPreview();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string NormalizeLevel(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        if (string.Equals(s, LevelEmergency, StringComparison.OrdinalIgnoreCase))
+            return LevelCritical;
+
+        if (string.Equals(s, LevelCritical, StringComparison.OrdinalIgnoreCase)) return LevelCritical;
+        if (string.Equals(s, LevelHigh, StringComparison.OrdinalIgnoreCase)) return LevelHigh;
+        if (string.Equals(s, LevelMedium, StringComparison.OrdinalIgnoreCase)) return LevelMedium;
+        if (string.Equals(s, LevelLow, StringComparison.OrdinalIgnoreCase)) return LevelLow;
+        if (string.Equals(s, LevelInfo, StringComparison.OrdinalIgnoreCase)) return LevelInfo;
+
+        return s;
+    }
+
+    private static string NormalizeCategory(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        return s;
+    }
+
+    private bool IsCategoryValid()
+        => !string.IsNullOrWhiteSpace(_selectedCategory);
+
+    private static int ClampPriorityScore(int raw)
+    {
+        if (raw <= 0)
+            return 0;
+
+        return Math.Max(1, Math.Min(120, raw));
+    }
+
+    private static string NormalizePriorityTag(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        if (string.Equals(s, PriorityEmergency, StringComparison.OrdinalIgnoreCase))
+            return PriorityCritical;
+
+        return s;
+    }
+
+    private string GetPriorityLabelFromTag(string? rawTag)
+    {
+        var tag = NormalizePriorityTag(rawTag);
+
+        return tag switch
+        {
+            PriorityCritical => L["Priority.Critical"],
+            PriorityVeryHigh => L["Priority.VeryHigh"],
+            PriorityHigh => L["Priority.High"],
+            PriorityMedium => L["Priority.Medium"],
+            PriorityLow => L["Priority.Low"],
+            _ => string.IsNullOrWhiteSpace(tag) ? L["Priority.Unknown"] : tag
+        };
+    }
+
+    private string GetPriorityTagFromScore(int clampedScore)
+    {
+        if (clampedScore <= 0) return string.Empty;
+        if (clampedScore >= 80) return PriorityCritical;
+        if (clampedScore >= 50) return PriorityVeryHigh;
+        if (clampedScore >= 30) return PriorityHigh;
+        if (clampedScore >= 15) return PriorityMedium;
+        return PriorityLow;
+    }
+
+    private static int GetWeightPriorityFromTicketSafe(Ticket ticket)
+    {
+        try
+        {
+            var t = ticket.GetType();
+
+            var p = t.GetProperty("WeightPriority", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("weight_priority", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("TicketPriorityValue", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("ticket_priority_value", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("PriorityValue", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("Priority", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            if (p is null)
+                return 0;
+
+            var raw = p.GetValue(ticket);
+            if (raw is null)
+                return 0;
+
+            if (raw is int i) return i;
+            if (raw is long l) return (int)Math.Max(int.MinValue, Math.Min(int.MaxValue, l));
+            if (raw is short s) return s;
+            if (raw is byte b) return b;
+            if (raw is decimal dec) return (int)Math.Round(dec, MidpointRounding.AwayFromZero);
+            if (raw is double dbl) return (int)Math.Round(dbl, MidpointRounding.AwayFromZero);
+            if (raw is float fl) return (int)Math.Round(fl, MidpointRounding.AwayFromZero);
+
+            var str = raw.ToString();
+            if (!string.IsNullOrWhiteSpace(str) && int.TryParse(str, out var parsed))
+                return parsed;
+
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private int GetPriorityScoreFromDb()
+    {
+        if (_isCreateMode)
+            return 0;
+
+        if (_ticket is null)
+            return 0;
+
+        return GetWeightPriorityFromTicketSafe(_ticket);
+    }
+
+    private int GetPriorityScoreForDisplay()
+    {
+        if (_isCreateMode)
+        {
+            if (_hasPriorityPreviewScore)
+                return _priorityPreviewScore;
+
+            return 0;
+        }
+
+        var changed = !string.Equals(_selectedImpact ?? string.Empty, _originalImpact ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                   || !string.Equals(_selectedUrgency ?? string.Empty, _originalUrgency ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        if (changed && _hasPriorityPreviewScore)
+            return _priorityPreviewScore;
+
+        return GetPriorityScoreFromDb();
+    }
+
+    private string GetPriorityDisplayText()
+    {
+        var raw = GetPriorityScoreForDisplay();
+        var clamped = ClampPriorityScore(raw);
+
+        if (clamped <= 0)
+            return "-";
+
+        var tag = GetPriorityTagFromScore(clamped);
+        var label = GetPriorityLabelFromTag(tag);
+
+        return $"{label} ({clamped})";
+    }
+
+    private string GetPriorityToggleClass()
+    {
+        var clamped = ClampPriorityScore(GetPriorityScoreForDisplay());
+        var tag = GetPriorityTagFromScore(clamped);
+
+        return tag switch
+        {
+            PriorityCritical => "prio-critical",
+            PriorityVeryHigh => "prio-veryhigh",
+            PriorityHigh => "prio-high",
+            PriorityMedium => "prio-medium",
+            PriorityLow => "prio-low",
+            _ => "prio-none"
+        };
+    }
+
+    private bool IsTitleValid()
+    {
+        var t = (_titleText ?? string.Empty).Trim();
+        return t.Length >= 10 && t.Length <= 160;
+    }
+
+    private string FormatDateTime(DateTime dt)
+    {
+        var safeUtc = EnsureUtc(dt);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(safeUtc, _userTimeZone);
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private static DateTime EnsureUtc(DateTime dt)
+    {
+        if (dt.Kind == DateTimeKind.Utc)
+            return dt;
+
+        return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+    }
+
+    private async Task<IEnumerable<string>> SearchRequesterAsync(string value, CancellationToken ct)
+    {
+        try
+        {
+            var search = (value ?? string.Empty).Trim();
+            if (ct.IsCancellationRequested)
+                return Enumerable.Empty<string>();
+
+            var all = await UsersService.GetActiveUserDisplayNamesAsync();
+
+            var list = (all ?? new List<string>())
+                .Select(s => (s ?? string.Empty).Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s));
+
+            if (string.IsNullOrWhiteSpace(search))
+                return list.OrderBy(s => s).Take(50).ToList();
+
+            return list
+                .Where(s => s.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(s => s)
+                .Take(50)
+                .ToList();
+        }
+        catch
+        {
+            return Enumerable.Empty<string>();
+        }
+    }
+
+    private async Task<IEnumerable<string>> SearchOperatorAsync(string value, CancellationToken ct)
+    {
+        try
+        {
+            var search = (value ?? string.Empty).Trim();
+            if (ct.IsCancellationRequested)
+                return Enumerable.Empty<string>();
+
+            var ops = await UsersService.GetOperatorDisplayNamesAsync();
+
+            var list = (ops ?? new List<string>())
+                .Select(s => (s ?? string.Empty).Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s));
+
+            if (string.IsNullOrWhiteSpace(search))
+                return list.OrderBy(s => s).Take(50).ToList();
+
+            return list
+                .Where(s => s.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(s => s)
+                .Take(50)
+                .ToList();
+        }
+        catch
+        {
+            return Enumerable.Empty<string>();
+        }
+    }
+
+    private string NormalizeReturnUrl(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "/tickets";
+
+        raw = raw.Trim();
+
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var abs))
+        {
+            var appBase = new Uri(NavigationManager.BaseUri);
+            if (!string.Equals(abs.Host, appBase.Host, StringComparison.OrdinalIgnoreCase))
+                return "/tickets";
+
+            return abs.PathAndQuery.StartsWith("/", StringComparison.Ordinal) ? abs.PathAndQuery : "/tickets";
+        }
+
+        if (!raw.StartsWith("/", StringComparison.Ordinal))
+            return "/tickets";
+
+        if (raw.StartsWith("//", StringComparison.Ordinal))
+            return "/tickets";
+
+        if (raw.Contains("\r") || raw.Contains("\n"))
+            return "/tickets";
+
+        return raw;
+    }
+
+    private void BackToReturnUrl()
+    {
+        NavigationManager.NavigateTo(_returnUrl, replace: true);
+    }
+
+    private static string GetStringProp(object obj, params string[] names)
+    {
+        if (obj is null || names is null || names.Length == 0)
+            return string.Empty;
+
+        var t = obj.GetType();
+
+        foreach (var n in names)
+        {
+            if (string.IsNullOrWhiteSpace(n))
+                continue;
+
+            var p = t.GetProperty(n, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p is null)
+                continue;
+
+            var val = p.GetValue(obj);
+            if (val is null)
+                continue;
+
+            if (val is string s)
+            {
+                s = s.Trim();
+                if (!string.IsNullOrWhiteSpace(s))
+                    return s;
+
+                continue;
+            }
+
+            var text = val.ToString()?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(text))
+                return text;
+        }
+
+        return string.Empty;
+    }
+
+    private string GetActionTargetStatusName(TicketsService.TicketActionRow row)
+    {
+        var to = GetStringProp(row,
+            "StatusToName",
+            "ToStatusName",
+            "TargetStatusName",
+            "TargetTicketStatusName",
+            "NewStatusName",
+            "StatusName",
+            "TicketStatusName",
+            "TicketStatusesName"
+        );
+
+        var from = GetStringProp(row,
+            "StatusFromName",
+            "FromStatusName",
+            "PreviousStatusName",
+            "OldStatusName"
+        );
+
+        if (!string.IsNullOrWhiteSpace(from) &&
+            !string.IsNullOrWhiteSpace(to) &&
+            !string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{from} -> {to}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(to))
+            return to;
+
+        return GetStringProp(row,
+            "TargetStatus",
+            "TargetStatusId"
+        );
+    }
+
+    private string GetActionWaitingReasonCode(TicketsService.TicketActionRow row)
+        => GetStringProp(row,
+            "WaitingReasonCode",
+            "WaitingReason",
+            "WaitReasonCode",
+            "WaitingReasonName",
+            "ReasonCode",
+            "WaitCode"
+        );
+
+    private static DateTime? GetCreatedAtUtcFromTicket(Ticket ticket)
+    {
+        try
+        {
+            var t = ticket.GetType();
+
+            var prop = t.GetProperty("CreatedAtUtc", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("CreatedAt", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("TicketCreatedAtUtc", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("TicketCreatedAt", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("created_at", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                ?? t.GetProperty("createdAt", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            if (prop is null)
+                return null;
+
+            var raw = prop.GetValue(ticket);
+            if (raw is null)
+                return null;
+
+            if (raw is DateTime dt)
+                return EnsureUtc(dt);
+
+            if (raw is DateTimeOffset dto)
+                return EnsureUtc(dto.UtcDateTime);
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void SetCreatedAtUtcOnTicket(Ticket ticket, DateTime utcValue)
+    {
+        try
+        {
+            var t = ticket.GetType();
+
+            var candidates = new[]
+            {
+                "CreatedAtUtc",
+                "CreatedAt",
+                "TicketCreatedAtUtc",
+                "TicketCreatedAt",
+                "created_at",
+                "createdAt"
+            };
+
+            foreach (var name in candidates)
+            {
+                var p = t.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                if (p is null || !p.CanWrite)
+                    continue;
+
+                if (p.PropertyType == typeof(DateTime))
+                {
+                    p.SetValue(ticket, EnsureUtc(utcValue));
+                    return;
+                }
+
+                if (p.PropertyType == typeof(DateTime?))
+                {
+                    p.SetValue(ticket, (DateTime?)EnsureUtc(utcValue));
+                    return;
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void EnsureCreatedAtOnTicket(Ticket ticket)
+    {
+        var current = GetCreatedAtUtcFromTicket(ticket);
+        if (current.HasValue)
+        {
+            _createdAtUtc = current.Value;
+            return;
+        }
+
+        if (_createdAtUtc.HasValue)
+        {
+            SetCreatedAtUtcOnTicket(ticket, _createdAtUtc.Value);
+        }
+    }
+
+    private void EnsureRequestDateOnTicket(Ticket ticket)
+    {
+        if (ticket.TicketRequestDate.HasValue)
+        {
+            _requestDateUtc = EnsureUtc(ticket.TicketRequestDate.Value);
+            return;
+        }
+
+        if (_requestDateUtc.HasValue)
+        {
+            ticket.TicketRequestDate = _requestDateUtc.Value;
+        }
+    }
+
+    private async Task UpdateTicketThroughAdapterAsync(Ticket ticket)
+    {
+        var svc = (object)TicketsService;
+        var t = svc.GetType();
+
+        var methods = t.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(m => string.Equals(m.Name, "UpdateTicketAsync", StringComparison.Ordinal))
+            .ToList();
+
+        if (methods.Count == 0)
+            throw new InvalidOperationException("TicketsService.UpdateTicketAsync not found.");
+
+        EnsureCreatedAtOnTicket(ticket);
+        EnsureRequestDateOnTicket(ticket);
+
+        // PRIORITY: zachowaj wartość z DB (TicketEdit nie zmienia zapisu)
+        var weightPriority = GetWeightPriorityFromTicketSafe(ticket);
+
+        foreach (var mi in methods)
+        {
+            var ps = mi.GetParameters();
+            if (ps.Length == 1 && ps[0].ParameterType.IsAssignableFrom(ticket.GetType()))
+            {
+                var resObj = mi.Invoke(svc, new object[] { ticket });
+                if (resObj is Task task)
+                {
+                    await task;
+                    return;
+                }
+            }
+        }
+
+        var createdAtUtc = GetCreatedAtUtcFromTicket(ticket) ?? _createdAtUtc;
+        var requestDateUtc = ticket.TicketRequestDate.HasValue ? EnsureUtc(ticket.TicketRequestDate.Value) : _requestDateUtc;
+
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = Convert.ToInt64(ticket.Id),
+            ["ticketId"] = Convert.ToInt64(ticket.Id),
+
+            ["title"] = (ticket.TicketTitle ?? string.Empty).Trim(),
+            ["ticketTitle"] = (ticket.TicketTitle ?? string.Empty).Trim(),
+
+            ["problemDescription"] = (ticket.ProblemDescription ?? string.Empty).Trim(),
+            ["description"] = (ticket.ProblemDescription ?? string.Empty).Trim(),
+
+            ["categoryName"] = (ticket.TicketCategoryName ?? string.Empty).Trim(),
+            ["ticketCategoryName"] = (ticket.TicketCategoryName ?? string.Empty).Trim(),
+
+            ["urgencyName"] = (ticket.TicketUrgencyName ?? string.Empty).Trim(),
+            ["ticketUrgencyName"] = (ticket.TicketUrgencyName ?? string.Empty).Trim(),
+
+            ["impactName"] = (ticket.TicketImpactName ?? string.Empty).Trim(),
+            ["ticketImpactName"] = (ticket.TicketImpactName ?? string.Empty).Trim(),
+
+            ["requesterName"] = (ticket.TicketRequesterName ?? string.Empty).Trim(),
+            ["ticketRequesterName"] = (ticket.TicketRequesterName ?? string.Empty).Trim(),
+
+            ["operatorName"] = (ticket.TicketOperatorName ?? string.Empty).Trim(),
+            ["keeperName"] = (ticket.TicketOperatorName ?? string.Empty).Trim(),
+            ["ticketOperatorName"] = (ticket.TicketOperatorName ?? string.Empty).Trim(),
+
+            ["statusName"] = (ticket.TicketStatusesName ?? string.Empty).Trim(),
+            ["ticketStatusesName"] = (ticket.TicketStatusesName ?? string.Empty).Trim(),
+
+            ["requestDate"] = requestDateUtc,
+            ["ticketRequestDate"] = requestDateUtc,
+
+            ["createdAt"] = createdAtUtc,
+            ["createdAtUtc"] = createdAtUtc,
+            ["ticketCreatedAt"] = createdAtUtc,
+            ["ticketCreatedAtUtc"] = createdAtUtc,
+            ["created"] = createdAtUtc,
+
+            // PRIORITY: dopasuj do podpisu TicketsService.UpdateTicketAsync(..., int weightPriority)
+            ["weightPriority"] = weightPriority,
+            ["ticketPriorityValue"] = weightPriority,
+            ["ticket_priority_value"] = weightPriority,
+            ["weight_priority"] = weightPriority,
+            ["priorityValue"] = weightPriority,
+            ["priority"] = weightPriority
+        };
+
+        foreach (var mi in methods.OrderByDescending(m => m.GetParameters().Length))
+        {
+            var ps = mi.GetParameters();
+            var args = new object?[ps.Length];
+            var ok = true;
+
+            for (var i = 0; i < ps.Length; i++)
+            {
+                var p = ps[i];
+                var pname = (p.Name ?? string.Empty).Trim();
+
+                if (values.TryGetValue(pname, out var v))
+                {
+                    args[i] = CoerceToParameterType(v, p.ParameterType);
+                    continue;
+                }
+
+                if (p.ParameterType == typeof(DateTime) || p.ParameterType == typeof(DateTime?))
+                {
+                    var pn = pname.ToLowerInvariant();
+
+                    var looksLikeCreated = pn.Contains("created");
+                    if (looksLikeCreated && createdAtUtc.HasValue)
+                    {
+                        args[i] = CoerceToParameterType(createdAtUtc.Value, p.ParameterType);
+                        continue;
+                    }
+
+                    var looksLikeRequestDate = pn.Contains("request") && pn.Contains("date");
+                    if (looksLikeRequestDate && requestDateUtc.HasValue)
+                    {
+                        args[i] = CoerceToParameterType(requestDateUtc.Value, p.ParameterType);
+                        continue;
+                    }
+
+                    args[i] = null;
+                    continue;
+                }
+
+                // PRIORITY: jeśli jakiś parametr int dotyczy priority, zawsze podaj wartość z DB
+                if (p.ParameterType == typeof(int) || p.ParameterType == typeof(int?))
+                {
+                    if (pname.Contains("priority", StringComparison.OrdinalIgnoreCase))
+                    {
+                        args[i] = CoerceToParameterType(weightPriority, p.ParameterType);
+                        continue;
+                    }
+
+                    args[i] = p.ParameterType == typeof(int) ? 0 : null;
+                    continue;
+                }
+
+                if (p.ParameterType == typeof(long) || p.ParameterType == typeof(long?))
+                {
+                    args[i] = Convert.ToInt64(ticket.Id);
+                    continue;
+                }
+
+                if (p.ParameterType == typeof(string))
+                {
+                    args[i] = string.Empty;
+                    continue;
+                }
+
+                if (p.HasDefaultValue)
+                {
+                    args[i] = p.DefaultValue;
+                    continue;
+                }
+
+                ok = false;
+                break;
+            }
+
+            if (!ok)
+                continue;
+
+            var resObj = mi.Invoke(svc, args);
+            if (resObj is Task task)
+            {
+                await task;
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("No compatible overload for TicketsService.UpdateTicketAsync was found.");
+    }
+
+    private static object? CoerceToParameterType(object? value, Type targetType)
+    {
+        if (value is null)
+            return null;
+
+        var nonNullable = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        try
+        {
+            if (nonNullable.IsInstanceOfType(value))
+                return value;
+
+            if (nonNullable == typeof(string))
+                return value.ToString() ?? string.Empty;
+
+            if (nonNullable == typeof(long))
+                return Convert.ToInt64(value);
+
+            if (nonNullable == typeof(int))
+                return Convert.ToInt32(value);
+
+            if (nonNullable == typeof(bool))
+                return Convert.ToBoolean(value);
+
+            if (nonNullable == typeof(DateTime))
+            {
+                if (value is DateTime dt)
+                    return EnsureUtc(dt);
+
+                if (value is DateTimeOffset dto)
+                    return EnsureUtc(dto.UtcDateTime);
+
+                if (value is string s && DateTime.TryParse(s, out var parsed))
+                    return EnsureUtc(parsed);
+            }
+
+            return Convert.ChangeType(value, nonNullable);
+        }
+        catch
+        {
+            return value;
+        }
+    }
+
+    // =========================
+    // PRIORITY: live preview helpers (best-effort)
+    // =========================
+
+    private void RecalculatePriorityPreview()
+    {
+        _hasPriorityPreviewScore = false;
+        _priorityPreviewScore = 0;
+
+        if (string.IsNullOrWhiteSpace(_selectedImpact) || string.IsNullOrWhiteSpace(_selectedUrgency))
+            return;
+
+        if (!_priorityWeightsLoaded)
+            return;
+
+        if (!_impactWeights.TryGetValue(_selectedImpact, out var iw))
+            return;
+
+        if (!_urgencyWeights.TryGetValue(_selectedUrgency, out var uw))
+            return;
+
+        var raw = iw * uw;
+        _priorityPreviewScore = ClampPriorityScore(raw);
+        _hasPriorityPreviewScore = _priorityPreviewScore > 0;
+    }
+
+    private async Task LoadPriorityWeightsSafeAsync()
+    {
+        try
+        {
+            _urgencyWeights.Clear();
+            _impactWeights.Clear();
+            _priorityWeightsLoaded = false;
+
+            // PRIORYTET: JEDNO ŹRÓDŁO PRAWDY jak w TicketIndex
+            // TicketsService.GetImpactAndUrgencyDictionaryAsync -> dbo.ticket_impacts / dbo.ticket_urgencies
+            var ok = await TryLoadWeightsFromImpactUrgencyDictionaryAsync();
+
+            // Fallback tylko gdy nie udało się pobrać słowników
+            if (!ok)
+            {
+                _urgencyWeights[LevelLow] = 2;
+                _urgencyWeights[LevelMedium] = 4;
+                _urgencyWeights[LevelHigh] = 6;
+                _urgencyWeights[LevelCritical] = 10;
+
+                _impactWeights[LevelInfo] = 1;
+                _impactWeights[LevelLow] = 2;
+                _impactWeights[LevelMedium] = 5;
+                _impactWeights[LevelHigh] = 7;
+                _impactWeights[LevelCritical] = 10;
+            }
+
+            _priorityWeightsLoaded = _urgencyWeights.Count > 0 && _impactWeights.Count > 0;
+
+            RecalculatePriorityPreview();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketEdit.LoadPriorityWeightsSafeAsync] ERROR: {ex}");
+            _priorityWeightsLoaded = false;
+        }
+    }
+
+    private async Task<bool> TryLoadWeightsFromImpactUrgencyDictionaryAsync()
+    {
+        try
+        {
+            var dict = await TicketsService.GetImpactAndUrgencyDictionaryAsync();
+            if (dict is null)
+                return false;
+
+            var any = false;
+
+            if (dict.Impacts != null)
+            {
+                foreach (var item in dict.Impacts)
+                {
+                    var name = NormalizeLevel(item?.Name);
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    var w = item?.Weight ?? 0;
+                    if (w <= 0)
+                        continue;
+
+                    _impactWeights[name] = w;
+                    any = true;
+                }
+            }
+
+            if (dict.Urgencies != null)
+            {
+                foreach (var item in dict.Urgencies)
+                {
+                    var name = NormalizeLevel(item?.Name);
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    var w = item?.Weight ?? 0;
+                    if (w <= 0)
+                        continue;
+
+                    _urgencyWeights[name] = w;
+                    any = true;
+                }
+            }
+
+            // Minimalne sanity: musimy mieć przynajmniej 1 wagę w obu słownikach
+            return _impactWeights.Count > 0 && _urgencyWeights.Count > 0 && any;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // =========================
+    // Lista uprawnień używanych w tym pliku
+    // =========================
+    // Tickets.View.Own
+    // Tickets.View.Assigned
+    // Tickets.View.Team
+    // Tickets.Create.Own
+    // Tickets.Edit.Own
+    // Tickets.Edit.Assigned
+    // Tickets.Edit.All
+    // Tickets.Assign.Team
+}

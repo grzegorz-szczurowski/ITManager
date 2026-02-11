@@ -1,0 +1,392 @@
+﻿@page "/assets/my-assets"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "Perm:Assets.MyAssets.View")]
+
+@* File: Components/Pages/MyAssets.razor
+   Description: My Assets - lista urządzeń, licencji i kart SIM przypisanych do zalogowanego użytkownika
+                (3 sekcje jeden pod drugim, bez paginacji i bez liczników).
+                Widok dostępny tylko dla ról z uprawnieniem Assets.MyAssets.View (read-only):
+                - bez nawigacji do szczegółów
+                - bez efektu hover i bez klikalności wierszy
+   Created: 2025-12-21
+   Version: 1.34
+   Change history:
+   1.00 (2025-12-21) - Pierwsza wersja.
+   1.10 (2025-12-21) - Układ: 3 DataGridy jeden pod drugim.
+   1.11 (2025-12-21) - Usunięta paginacja.
+   1.12 (2025-12-21) - Usunięte liczniki (MudChip) z nagłówków sekcji.
+   1.13 (2025-12-31) - UX: usunięto wyszukiwarkę, refresh jako ikona przy tytule, zmiana tekstów.
+   1.20 (2026-01-09) - RBAC: sekcje i klik w wiersz respektują uprawnienia View/Edit, brak dostępu -> komunikat.
+   1.30 (2026-01-10) - Polityka: każdy zalogowany user może podejrzeć wyłącznie swoje zasoby (read-only).
+   1.33 (2026-01-21) - HARD RBAC: strona wymaga policy Perm:Assets.MyAssets.View.
+   1.34 (2026-01-21) - Localization: IStringLocalizer + pl-PL/en-US resx. *@
+
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services.Auth
+@using ITManager.Services
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+
+@inject CurrentUserContextService CurrentUserContextService
+@inject DevicesService DevicesService
+@inject LicensesService LicensesService
+@inject SimCardsService SimCardsService
+@inject NavigationManager Navigation
+@inject IStringLocalizer<MyAssets> L
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="3">
+
+        <!-- HEADER -->
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudStack Spacing="0">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Disabled="@_isAnyLoading"
+                                   OnClick="ReloadAllAsync"
+                                   Title="@L["Refresh"]" />
+                </MudStack>
+
+                <MudText Typo="Typo.subtitle2" Class="mud-text-secondary">
+                    @L["Subtitle"]
+                </MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (!string.IsNullOrWhiteSpace(_pageError))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                @_pageError
+            </MudAlert>
+        }
+
+        @if (_isAnyLoading)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudProgressCircular Indeterminate="true" Size="Size.Medium" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @L["Loading"]
+                </MudText>
+            </MudStack>
+        }
+
+        <!-- INFO: inconsistencies (before lists) -->
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            <MudText Typo="Typo.body2">
+                @L["InconsistenciesInfo"]
+            </MudText>
+        </MudAlert>
+
+        <!-- DEVICES -->
+        <MudPaper Elevation="0" Class="pa-3">
+            <MudStack Spacing="2">
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.Computer" />
+                    <MudText Typo="Typo.h6">@L["DevicesSectionTitle"]</MudText>
+                </MudStack>
+
+                @if (!string.IsNullOrWhiteSpace(_devicesError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                        @_devicesError
+                    </MudAlert>
+                }
+                else if (_devicesAll.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        @L["NoDevices"]
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudDataGrid T="DeviceListRow"
+                                 Items="@_devicesAll"
+                                 Dense="true"
+                                 Hover="false"
+                                 Bordered="false"
+                                 Striped="false"
+                                 Elevation="0"
+                                 Loading="@_devicesLoading"
+                                 Breakpoint="Breakpoint.Sm"
+                                 RowClassFunc="GetRowClass">
+                        <Columns>
+                            <PropertyColumn Property="x => x.Kind" Title="@L["ColKind"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Hostname" Title="@L["ColHostname"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Model" Title="@L["ColModel"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.SerialNumber" Title="@L["ColSerialNumber"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.AssetNo" Title="@L["ColAssetNo"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Status" Title="@L["ColStatus"]" Sortable="true" />
+                        </Columns>
+                    </MudDataGrid>
+
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @L["ReadOnlyHint"]
+                    </MudText>
+                }
+
+            </MudStack>
+        </MudPaper>
+
+        <!-- LICENSES -->
+        <MudPaper Elevation="0" Class="pa-3">
+            <MudStack Spacing="2">
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.VpnKey" />
+                    <MudText Typo="Typo.h6">@L["LicensesSectionTitle"]</MudText>
+                </MudStack>
+
+                @if (!string.IsNullOrWhiteSpace(_licensesError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                        @_licensesError
+                    </MudAlert>
+                }
+                else if (_licensesAll.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        @L["NoLicenses"]
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudDataGrid T="LicenseListRow"
+                                 Items="@_licensesAll"
+                                 Dense="true"
+                                 Hover="false"
+                                 Bordered="false"
+                                 Striped="false"
+                                 Elevation="0"
+                                 Loading="@_licensesLoading"
+                                 Breakpoint="Breakpoint.Sm"
+                                 RowClassFunc="GetRowClass">
+                        <Columns>
+                            <PropertyColumn Property="x => x.Name" Title="@L["ColName"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Type" Title="@L["ColType"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.InventoryNo" Title="@L["ColInventoryNo"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.SubscriptionEnds" Title="@L["ColSubscriptionEnds"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Status" Title="@L["ColStatus"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Note" Title="@L["ColNote"]" Sortable="false" />
+                        </Columns>
+                    </MudDataGrid>
+
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @L["ReadOnlyHint"]
+                    </MudText>
+                }
+
+            </MudStack>
+        </MudPaper>
+
+        <!-- SIM CARDS -->
+        <MudPaper Elevation="0" Class="pa-3">
+            <MudStack Spacing="2">
+
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.SimCard" />
+                    <MudText Typo="Typo.h6">@L["SimSectionTitle"]</MudText>
+                </MudStack>
+
+                @if (!string.IsNullOrWhiteSpace(_simError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                        @_simError
+                    </MudAlert>
+                }
+                else if (_simAll.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        @L["NoSimCards"]
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudDataGrid T="SimCardEditModel"
+                                 Items="@_simAll"
+                                 Dense="true"
+                                 Hover="false"
+                                 Bordered="false"
+                                 Striped="false"
+                                 Elevation="0"
+                                 Loading="@_simLoading"
+                                 Breakpoint="Breakpoint.Sm"
+                                 RowClassFunc="GetRowClass">
+                        <Columns>
+                            <PropertyColumn Property="x => x.Type" Title="@L["ColType"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.MobileNumber" Title="@L["ColMobileNumber"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.SimCardNumber" Title="@L["ColSimCardNumber"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Operator" Title="@L["ColOperator"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Plan" Title="@L["ColPlan"]" Sortable="true" />
+                            <PropertyColumn Property="x => x.Status" Title="@L["ColStatus"]" Sortable="true" />
+                        </Columns>
+                    </MudDataGrid>
+
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @L["ReadOnlyHint"]
+                    </MudText>
+                }
+
+            </MudStack>
+        </MudPaper>
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .asset-row {
+        min-height: 44px;
+    }
+
+    .asset-row td,
+    .asset-row .mud-table-cell {
+        vertical-align: middle;
+    }
+</style>
+
+@code
+{
+    private string _pageError = string.Empty;
+
+    private bool _devicesLoading;
+    private string _devicesError = string.Empty;
+    private List<DeviceListRow> _devicesAll = new();
+
+    private bool _licensesLoading;
+    private string _licensesError = string.Empty;
+    private List<LicenseListRow> _licensesAll = new();
+
+    private bool _simLoading;
+    private string _simError = string.Empty;
+    private List<SimCardEditModel> _simAll = new();
+
+    private bool _isAnyLoading => _devicesLoading || _licensesLoading || _simLoading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAllAsync();
+    }
+
+    private async Task ReloadAllAsync()
+    {
+        _pageError = string.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+        }
+        catch (Exception ex)
+        {
+            _pageError = L["InitUserError", ex.Message];
+            return;
+        }
+
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        if (!ctx.IsAuthenticated || ctx.IsActive != true)
+        {
+            _pageError = L["OnlyForAuthenticated"];
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        if (ctx.UserId is null || ctx.UserId <= 0)
+        {
+            _pageError = L["MissingUserId"];
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        var userId = ctx.UserId.Value;
+
+        var tasks = new List<Task>
+        {
+            ReloadDevicesAsync(userId),
+            ReloadLicensesAsync(userId),
+            ReloadSimAsync(userId)
+        };
+
+        await Task.WhenAll(tasks);
+
+        StateHasChanged();
+    }
+
+    private async Task ReloadDevicesAsync(int userId)
+    {
+        _devicesLoading = true;
+        _devicesError = string.Empty;
+
+        try
+        {
+            var r = await DevicesService.GetMyDevicesAsync(userId);
+            _devicesAll = r.Ok ? r.Rows ?? new() : new();
+            if (!r.Ok) _devicesError = r.ErrorMessage;
+        }
+        catch (Exception ex)
+        {
+            _devicesAll = new();
+            _devicesError = L["DevicesReadError", ex.Message];
+        }
+        finally
+        {
+            _devicesLoading = false;
+        }
+    }
+
+    private async Task ReloadLicensesAsync(int userId)
+    {
+        _licensesLoading = true;
+        _licensesError = string.Empty;
+
+        try
+        {
+            var r = await LicensesService.GetMyLicensesAsync(userId);
+            _licensesAll = r.Ok ? r.Rows ?? new() : new();
+            if (!r.Ok) _licensesError = r.ErrorMessage;
+        }
+        catch (Exception ex)
+        {
+            _licensesAll = new();
+            _licensesError = L["LicensesReadError", ex.Message];
+        }
+        finally
+        {
+            _licensesLoading = false;
+        }
+    }
+
+    private async Task ReloadSimAsync(int userId)
+    {
+        _simLoading = true;
+        _simError = string.Empty;
+
+        try
+        {
+            var r = await SimCardsService.GetMySimCardsAsync(userId);
+            _simAll = r.Ok ? r.Rows ?? new() : new();
+            if (!r.Ok) _simError = r.ErrorMessage;
+        }
+        catch (Exception ex)
+        {
+            _simAll = new();
+            _simError = L["SimReadError", ex.Message];
+        }
+        finally
+        {
+            _simLoading = false;
+        }
+    }
+
+    private string GetRowClass(object row, int index)
+    {
+        _ = row;
+        _ = index;
+        return "asset-row";
+    }
+}

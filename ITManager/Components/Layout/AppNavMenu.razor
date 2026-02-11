@@ -1,0 +1,1045 @@
+﻿@namespace ITManager.Components.Layout
+
+@*  
+// File: Components/Layout/AppNavMenu.razor
+// Description: Menu dla MudDrawer budowane dynamicznie z konfiguracji sekcji i elementów.
+//              Dla /tickets/queue pokazuje licznik zgłoszeń oczekujących na przypisanie.
+//              Dla /tickets/assigned pokazuje licznik otwartych zgłoszeń przypisanych do mnie.
+//              Dla /tickets pokazuje licznik otwartych zgłoszeń globalnie (All).
+//              RBAC: widoczność menu na podstawie RequiredAllPermissions/RequiredAnyPermissions z AppMenuConfig.
+//              Windows only: menu ładuje permissiony wyłącznie dla uwierzytelnionego użytkownika domenowego.
+// Created: 2025-12-13
+// Updated: 2025-12-19 - licznik "New tickets" w menu (queue count) + odświeżanie po nawigacji.
+// Updated: 2025-12-19 - większy odstęp licznika od prawej krawędzi drawera.
+// Updated: 2025-12-23 - RBAC only: usunięcie legacy RequiresCan* i filtrowanie wyłącznie po RequiredAll/Any.
+// Updated: 2025-12-30 - fix: sekcje rozwijają się wg ExpandedByDefault; stabilizacja stanu expanded.
+// Updated: 2026-01-06 - UX: usunięto Favorites i wyszukiwarkę; ExpandedByDefault steruje stanem sekcji.
+// Updated: 2026-01-07 - Menu action: obsługa pozycji typu Dialog (bez nawigacji) na podstawie AppMenuItem.ActionType + DialogKey.
+// Updated: 2026-01-09 - wersja 1.07 - no-access UX + queue count tylko gdy item jest widoczny.
+// Updated: 2026-01-09 - wersja 1.08 - dodano obsługę IsVisible (manual feature toggle).
+// Updated: 2026-01-09 - wersja 1.09 - UserRoles only: no-access = Windows auth bez ról/uprawnień; użycie helperów Can/HasAccess.
+// Updated: 2026-01-18 - i18n: tłumaczenia komunikatów stałych (alerty, snackbary, queue loading).
+// Updated: 2026-01-25 - wersja 1.11:
+//   - RBAC: spójne dopasowanie permissionów w UI (trim, case-insensitive, wildcard: "*" i "Prefix.*").
+//   - Logging: ILogger zamiast Console.Error, bez cichego połykania wyjątków.
+//   - UX: debounce dla LocationChanged (mniej zbędnych odświeżeń).
+// Updated: 2026-01-28 - wersja 1.12:
+//   - UX: badge także dla /tickets/assigned (otwarte przypisane do mnie).
+// Updated: 2026-02-02 - wersja 1.13:
+//   - RBAC: migracja liczników menu z legacy "Tickets.View"/"Tickets.Edit" do nowej architektury (Tickets.View.* / Tickets.Edit.* / Tickets.Assign.Team).
+// Updated: 2026-02-03 - wersja 1.14:
+//   - UX/RBAC: "Create ticket" z menu kieruje operatorów do TicketEdit (/tickets/0) gdy mają Tickets.Edit.Assigned lub Tickets.Edit.All,
+//              w przeciwnym razie otwiera TicketCreateDialog.
+// Updated: 2026-02-05 - wersja 1.15:
+//   - UX: akordeon w drawerze, w danym momencie rozwinięta jest tylko jedna sekcja.
+// Updated: 2026-02-05 - wersja 1.16:
+//   - UX: auto rozwijanie sekcji na podstawie aktualnego URL (Match.All/Prefix).
+// Updated: 2026-02-05 - wersja 1.17:
+//   - UX: stan akordeonu oparty o stabilne Section.Key zamiast Title.
+// Updated: 2026-02-05 - wersja 1.18:
+//   - i18n: lokalizacja sekcji po kluczu Section.<Key> (np. Section.overview) zamiast po tytule.
+// Updated: 2026-02-05 - wersja 1.19:
+//   - UX: wyróżnienie aktywnej pozycji i aktywnej sekcji menu.
+// Updated: 2026-02-05 - wersja 1.20:
+//   - UX: gwarancja, że aktywna jest tylko jedna pozycja (najlepsze dopasowanie URL), bez wielokrotnego podświetlania.
+// Updated: 2026-02-05 - wersja 1.21:
+//   - UX: aktywna pozycja liczona z Uri.AbsolutePath, filtry w URL nie wpływają na highlight.
+// Updated: 2026-02-06 - wersja 1.22:
+//   - Tickets: dodano licznik dla /tickets (All) oraz usunięto reflection dla /tickets/assigned (metoda w TicketsService).
+// Updated: 2026-02-08 - wersja 1.23:
+//   - Tickets: "Create ticket" nie otwiera dialogu, tylko nawigację do strony.
+//              Operator -> /tickets/0 (TicketEdit), user -> /tickets/new (TicketCreate).
+// Updated: 2026-02-08 - wersja 1.24:
+//   - Tickets: "Create ticket" zawsze prowadzi do /tickets/new (TicketCreate), bez warunków operator/user.
+// Updated: 2026-02-09 - wersja 1.25:
+//   - FIX: stabilizacja CancellationTokenSource dla LocationChanged (brak ObjectDisposedException przy szybkiej nawigacji).
+// Version: 1.25
+//
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using ITManager.Models.Navigation
+@using ITManager.Services.Auth
+@using ITManager.Services
+
+@implements IDisposable
+
+@inject IStringLocalizer<AppNavMenu> L
+@inject ILogger<AppNavMenu> Logger
+@inject CurrentUserContextService CurrentUserContextService
+@inject TicketsService TicketsService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+
+<MudNavMenu Dense="true">
+
+    @{
+        var ctx = CurrentUserContextService.CurrentUser;
+        var isNoAccess = ctx != null && ctx.IsAuthenticated && !CurrentUserContextService.HasAccess;
+    }
+
+    @if (isNoAccess)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="ma-2">
+            @L["NoAccess.Message"]
+            <div style="opacity:0.8; font-size:0.85em; margin-top:6px;">
+                @L["NoAccess.Details",
+                ctx!.Login,
+                        (ctx.ObjectGuid?.ToString() ?? L["Common.Null"].Value),
+                        (ctx.IsActive?.ToString() ?? L["Common.Null"].Value)]
+        </div>
+    </MudAlert>
+        }
+    else if (_filteredSections.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="ma-2">
+            @L["NoModules.Message"]
+        </MudAlert>
+    }
+
+    @foreach (var menuSection in _filteredSections)
+    {
+        var isSectionActive = string.Equals(menuSection?.Key ?? string.Empty, _activeSectionKey ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        var sectionClass = isSectionActive ? "nav-section-active" : string.Empty;
+
+        <MudNavGroup Title="@GetSectionDisplayTitle(menuSection)"
+                     Icon="@menuSection.Icon"
+                     Expanded="@IsSectionExpanded(menuSection)"
+                     ExpandedChanged="@(v => OnSectionExpandedChanged(menuSection, v))"
+                     Class="@sectionClass">
+
+            @foreach (var item in menuSection.Items)
+            {
+                var countKind = GetCountKind(item.Href);
+                var isCountItem = countKind != CountKind.None;
+                var isDialogItem = item.ActionType == AppMenuActionType.Dialog;
+
+                var isItemActive = !isDialogItem && IsActiveItemHref(item.Href);
+                var linkClass = isItemActive ? "nav-link-active" : string.Empty;
+
+                <MudNavLink Href="@(isDialogItem ? null : item.Href)"
+                            Match="@(isDialogItem ? NavLinkMatch.Prefix : NavLinkMatch.All)"
+                            Icon="@item.Icon"
+                            OnClick="@(isDialogItem ? ((MouseEventArgs _) => OnMenuDialogClickedAsync(item)) : null)"
+                            Class="@linkClass">
+
+                    @if (isCountItem)
+                    {
+                        <span class="nav-item-row">
+                            <span class="nav-item-title">@GetItemDisplayTitle(item.Title)</span>
+                            <span class="nav-item-count">@GetCountText(countKind)</span>
+                        </span>
+                    }
+                    else
+                    {
+                        @GetItemDisplayTitle(item.Title)
+                    }
+
+                </MudNavLink>
+            }
+
+        </MudNavGroup>
+    }
+
+</MudNavMenu>
+
+<style>
+    .nav-item-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .nav-item-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .nav-item-count {
+        font-size: 0.85em;
+        opacity: 0.75;
+        white-space: nowrap;
+        flex: 0 0 auto;
+        padding-right: 16px;
+    }
+
+    .nav-link-active {
+        font-weight: 600;
+    }
+
+        .nav-link-active .nav-item-count {
+            opacity: 1.0;
+            font-weight: 600;
+        }
+
+    .nav-section-active .mud-nav-group-title {
+        font-weight: 700;
+    }
+
+        .nav-section-active .mud-nav-group-title .mud-icon-root {
+            opacity: 1.0;
+        }
+</style>
+
+@code
+{
+    private const string PermViewOwn = "Tickets.View.Own";
+    private const string PermViewAssigned = "Tickets.View.Assigned";
+    private const string PermViewTeam = "Tickets.View.Team";
+
+    private const string PermCreateOwn = "Tickets.Create.Own";
+
+    private const string PermEditOwn = "Tickets.Edit.Own";
+    private const string PermEditAssigned = "Tickets.Edit.Assigned";
+    private const string PermEditTeam = "Tickets.Edit.Team";
+    private const string PermEditAll = "Tickets.Edit.All";
+
+    private const string PermAssignTeam = "Tickets.Assign.Team";
+
+    private enum CountKind
+    {
+        None = 0,
+        Queue = 1,
+        AssignedToMe = 2,
+        All = 3
+    }
+
+    [Parameter] public bool IsDrawerExpanded { get; set; } = true;
+
+    private readonly List<AppMenuSection> _sections = AppMenuConfig.BuildDefault();
+
+    private List<AppMenuSection> _filteredSections = new();
+
+    private HashSet<string> _effectivePerms = new(StringComparer.OrdinalIgnoreCase);
+
+    private int? _queueCount;
+    private bool _queueCountLoading;
+    private bool _queueItemVisible;
+
+    private int? _assignedToMeOpenCount;
+    private bool _assignedToMeCountLoading;
+    private bool _assignedToMeItemVisible;
+
+    private int? _allOpenCount;
+    private bool _allCountLoading;
+    private bool _allItemVisible;
+
+    private CancellationTokenSource? _navCts;
+
+    private string? _openSectionKey;
+
+    private string _currentPath = "/";
+    private string? _activeSectionKey;
+    private string? _activeItemHref;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _filteredSections = CloneSections(_sections);
+        _currentPath = GetCurrentAppPath();
+
+        try
+        {
+            await LoadEffectivePermissionsAsync();
+
+            (_queueItemVisible, _assignedToMeItemVisible, _allItemVisible) = ApplyAuthorizationFilter();
+
+            EnsureOpenSectionIsValid();
+            EnsureOpenSectionMatchesCurrentUrl();
+            RecalculateActiveMenuState();
+
+            NavigationManager.LocationChanged += OnLocationChanged;
+
+            await RefreshCountersAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AppNavMenu] Błąd inicjalizacji.");
+            _effectivePerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _filteredSections = new List<AppMenuSection>();
+            _queueCount = null;
+            _assignedToMeOpenCount = null;
+            _allOpenCount = null;
+            _openSectionKey = null;
+            _currentPath = "/";
+            _activeSectionKey = null;
+            _activeItemHref = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+
+        var old = Interlocked.Exchange(ref _navCts, null);
+        if (old == null)
+            return;
+
+        try
+        {
+            old.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            old.Dispose();
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var old = Interlocked.Exchange(ref _navCts, new CancellationTokenSource());
+
+        if (old != null)
+        {
+            try
+            {
+                old.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                old.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        var token = _navCts!.Token;
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(150, token);
+
+                _currentPath = GetCurrentAppPath();
+
+                await LoadEffectivePermissionsAsync();
+
+                (_queueItemVisible, _assignedToMeItemVisible, _allItemVisible) = ApplyAuthorizationFilter();
+
+                EnsureOpenSectionIsValid();
+                EnsureOpenSectionMatchesCurrentUrl();
+                RecalculateActiveMenuState();
+
+                await RefreshCountersAsync();
+
+                StateHasChanged();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "[AppNavMenu] Błąd odświeżania menu po nawigacji.");
+            }
+        });
+    }
+
+    private string GetCurrentAppPath()
+    {
+        try
+        {
+            var absolute = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
+
+            var absPath = absolute.AbsolutePath;
+            var baseRel = NavigationManager.ToBaseRelativePath(absPath);
+
+            if (string.IsNullOrWhiteSpace(baseRel))
+                return "/";
+
+            var p = baseRel.Trim();
+            p = p.Trim('/');
+
+            if (p.Length == 0)
+                return "/";
+
+            return "/" + p;
+        }
+        catch
+        {
+            var fallback = "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+            return NormalizePath(fallback);
+        }
+    }
+
+    private void EnsureOpenSectionIsValid()
+    {
+        if (_filteredSections.Count == 0)
+        {
+            _openSectionKey = null;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_openSectionKey))
+        {
+            var exists = _filteredSections.Any(s =>
+                s != null &&
+                string.Equals(s.Key ?? string.Empty, _openSectionKey, StringComparison.OrdinalIgnoreCase));
+
+            if (exists)
+                return;
+        }
+
+        var preferred = _filteredSections.FirstOrDefault(s => s != null && s.ExpandedByDefault)?.Key;
+
+        _openSectionKey = string.IsNullOrWhiteSpace(preferred) ? null : preferred;
+    }
+
+    private void EnsureOpenSectionMatchesCurrentUrl()
+    {
+        if (_filteredSections.Count == 0)
+            return;
+
+        foreach (var section in _filteredSections)
+        {
+            if (section == null || section.Items == null || section.Items.Count == 0)
+                continue;
+
+            foreach (var item in section.Items)
+            {
+                if (item == null)
+                    continue;
+
+                if (item.ActionType == AppMenuActionType.Dialog)
+                    continue;
+
+                var href = NormalizePath(item.Href);
+
+                if (string.IsNullOrWhiteSpace(href))
+                    continue;
+
+                if (IsUrlMatch(_currentPath, href, item.Match))
+                {
+                    _openSectionKey = section.Key;
+                    return;
+                }
+            }
+        }
+    }
+
+    private void RecalculateActiveMenuState()
+    {
+        _activeSectionKey = null;
+        _activeItemHref = null;
+
+        if (_filteredSections.Count == 0)
+            return;
+
+        var bestScore = -1;
+        string? bestSectionKey = null;
+        string? bestHref = null;
+
+        foreach (var section in _filteredSections)
+        {
+            if (section == null || section.Items == null || section.Items.Count == 0)
+                continue;
+
+            foreach (var item in section.Items)
+            {
+                if (item == null)
+                    continue;
+
+                if (item.ActionType == AppMenuActionType.Dialog)
+                    continue;
+
+                var href = NormalizePath(item.Href);
+                if (string.IsNullOrWhiteSpace(href))
+                    continue;
+
+                if (!IsUrlMatch(_currentPath, href, item.Match))
+                    continue;
+
+                var isExact = string.Equals(_currentPath, href, StringComparison.OrdinalIgnoreCase);
+                var score = href.Length + (isExact ? 10000 : 0);
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestSectionKey = section.Key;
+                    bestHref = href;
+                }
+            }
+        }
+
+        _activeSectionKey = bestSectionKey;
+        _activeItemHref = bestHref;
+    }
+
+    private bool IsActiveItemHref(string? href)
+    {
+        if (string.IsNullOrWhiteSpace(_activeItemHref))
+            return false;
+
+        var normalized = NormalizePath(href);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        return string.Equals(normalized, _activeItemHref, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsSectionExpanded(AppMenuSection section)
+    {
+        if (section == null)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(_openSectionKey))
+            return false;
+
+        return string.Equals(section.Key ?? string.Empty, _openSectionKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnSectionExpandedChanged(AppMenuSection section, bool expanded)
+    {
+        if (section == null)
+            return;
+
+        var key = section.Key ?? string.Empty;
+
+        if (expanded)
+        {
+            _openSectionKey = key;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_openSectionKey) &&
+            string.Equals(_openSectionKey, key, StringComparison.OrdinalIgnoreCase))
+        {
+            _openSectionKey = null;
+        }
+    }
+
+    private static bool IsUrlMatch(string currentPath, string itemHref, NavLinkMatch match)
+    {
+        if (string.IsNullOrWhiteSpace(currentPath) || string.IsNullOrWhiteSpace(itemHref))
+            return false;
+
+        if (match == NavLinkMatch.All)
+        {
+            return string.Equals(currentPath, itemHref, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.Equals(currentPath, itemHref, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (currentPath.StartsWith(itemHref, StringComparison.OrdinalIgnoreCase))
+        {
+            if (itemHref.EndsWith("/", StringComparison.Ordinal))
+                return true;
+
+            if (currentPath.Length == itemHref.Length)
+                return true;
+
+            var next = currentPath[itemHref.Length];
+            return next == '/';
+        }
+
+        return false;
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        var p = (path ?? string.Empty).Trim();
+        if (p.Length == 0)
+            return "/";
+
+        var qIndex = p.IndexOf('?', StringComparison.Ordinal);
+        if (qIndex >= 0)
+            p = p.Substring(0, qIndex);
+
+        var hashIndex = p.IndexOf('#', StringComparison.Ordinal);
+        if (hashIndex >= 0)
+            p = p.Substring(0, hashIndex);
+
+        if (!p.StartsWith("/", StringComparison.Ordinal))
+            p = "/" + p;
+
+        if (p.Length > 1 && p.EndsWith("/", StringComparison.Ordinal))
+            p = p.TrimEnd('/');
+
+        return p;
+    }
+
+    private async Task LoadEffectivePermissionsAsync()
+    {
+        var perms = await CurrentUserContextService.GetEffectivePermissionCodesAsync();
+
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        if (ctx == null || !ctx.IsAuthenticated || !CurrentUserContextService.HasAccess)
+        {
+            _effectivePerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return;
+        }
+
+        _effectivePerms = NormalizePermissions(perms);
+    }
+
+    private static HashSet<string> NormalizePermissions(IReadOnlyCollection<string>? perms)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (perms == null || perms.Count == 0)
+            return set;
+
+        foreach (var p in perms)
+        {
+            var val = (p ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(val))
+                set.Add(val);
+        }
+
+        return set;
+    }
+
+    private async Task RefreshCountersAsync()
+    {
+        if (_queueItemVisible)
+            await RefreshQueueCountAsync();
+        else
+            _queueCount = null;
+
+        if (_assignedToMeItemVisible)
+            await RefreshAssignedToMeOpenCountAsync();
+        else
+            _assignedToMeOpenCount = null;
+
+        if (_allItemVisible)
+            await RefreshAllOpenCountAsync();
+        else
+            _allOpenCount = null;
+    }
+
+    private bool HasPermAny(params string[] codes)
+    {
+        if (codes == null || codes.Length == 0)
+            return false;
+
+        foreach (var c in codes)
+        {
+            if (HasPerm(c))
+                return true;
+        }
+
+        return false;
+    }
+
+    private async Task RefreshQueueCountAsync()
+    {
+        if (!_queueItemVisible)
+        {
+            _queueCount = null;
+            return;
+        }
+
+        if (_queueCountLoading)
+            return;
+
+        _queueCountLoading = true;
+
+        try
+        {
+            _queueCount = await TicketsService.GetTicketsQueueCountAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[AppNavMenu] Nie udało się pobrać queue count.");
+            _queueCount = null;
+        }
+        finally
+        {
+            _queueCountLoading = false;
+        }
+    }
+
+    private async Task RefreshAssignedToMeOpenCountAsync()
+    {
+        if (!_assignedToMeItemVisible)
+        {
+            _assignedToMeOpenCount = null;
+            return;
+        }
+
+        if (_assignedToMeCountLoading)
+            return;
+
+        _assignedToMeCountLoading = true;
+
+        try
+        {
+            _assignedToMeOpenCount = await TicketsService.GetAssignedToMeOpenTicketsCountAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[AppNavMenu] Nie udało się pobrać licznika Assigned to me.");
+            _assignedToMeOpenCount = null;
+        }
+        finally
+        {
+            _assignedToMeCountLoading = false;
+        }
+    }
+
+    private async Task RefreshAllOpenCountAsync()
+    {
+        if (!_allItemVisible)
+        {
+            _allOpenCount = null;
+            return;
+        }
+
+        if (_allCountLoading)
+            return;
+
+        _allCountLoading = true;
+
+        try
+        {
+            _allOpenCount = await TicketsService.GetAllOpenTicketsCountAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[AppNavMenu] Nie udało się pobrać licznika All.");
+            _allOpenCount = null;
+        }
+        finally
+        {
+            _allCountLoading = false;
+        }
+    }
+
+    private string GetCountText(CountKind kind)
+    {
+        if (kind == CountKind.Queue)
+        {
+            if (_queueCountLoading)
+                return L["Queue.Loading"].Value;
+
+            if (_queueCount is null)
+                return string.Empty;
+
+            return $"({_queueCount.Value})";
+        }
+
+        if (kind == CountKind.AssignedToMe)
+        {
+            if (_assignedToMeCountLoading)
+                return "...";
+
+            if (_assignedToMeOpenCount is null)
+                return string.Empty;
+
+            return $"({_assignedToMeOpenCount.Value})";
+        }
+
+        if (kind == CountKind.All)
+        {
+            if (_allCountLoading)
+                return "...";
+
+            if (_allOpenCount is null)
+                return string.Empty;
+
+            return $"({_allOpenCount.Value})";
+        }
+
+        return string.Empty;
+    }
+
+    private static CountKind GetCountKind(string? href)
+    {
+        if (IsQueueHref(href))
+            return CountKind.Queue;
+
+        if (IsAssignedHref(href))
+            return CountKind.AssignedToMe;
+
+        if (IsAllHref(href))
+            return CountKind.All;
+
+        return CountKind.None;
+    }
+
+    private static bool IsQueueHref(string? href)
+    {
+        var h = (href ?? string.Empty).Trim();
+        return string.Equals(h, "/tickets/queue", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAssignedHref(string? href)
+    {
+        var h = (href ?? string.Empty).Trim();
+        return string.Equals(h, "/tickets/assigned", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAllHref(string? href)
+    {
+        var h = (href ?? string.Empty).Trim();
+        return string.Equals(h, "/tickets", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private (bool QueueVisible, bool AssignedToMeVisible, bool AllVisible) ApplyAuthorizationFilter()
+    {
+        var filtered = new List<AppMenuSection>();
+        var queueVisible = false;
+        var assignedVisible = false;
+        var allVisible = false;
+
+        foreach (var menuSection in _sections)
+        {
+            var allowedItems = menuSection.Items
+                .Where(i => i != null && i.IsVisible)
+                .Where(i => IsMenuItemAllowed(i, _effectivePerms))
+                .ToList();
+
+            if (allowedItems.Count == 0)
+                continue;
+
+            if (!queueVisible && allowedItems.Any(i => IsQueueHref(i.Href)))
+                queueVisible = true;
+
+            if (!assignedVisible && allowedItems.Any(i => IsAssignedHref(i.Href)))
+                assignedVisible = true;
+
+            if (!allVisible && allowedItems.Any(i => IsAllHref(i.Href)))
+                allVisible = true;
+
+            filtered.Add(new AppMenuSection
+            {
+                Key = menuSection.Key,
+                Title = menuSection.Title,
+                Icon = menuSection.Icon,
+                ExpandedByDefault = menuSection.ExpandedByDefault,
+                Items = allowedItems
+            });
+        }
+
+        _filteredSections = CloneSections(filtered);
+        return (queueVisible, assignedVisible, allVisible);
+    }
+
+    private static bool IsMenuItemAllowed(AppMenuItem item, HashSet<string> perms)
+    {
+        if (item == null)
+            return false;
+
+        if (item.RequiredAllPermissions != null && item.RequiredAllPermissions.Count > 0)
+        {
+            foreach (var codeRaw in item.RequiredAllPermissions)
+            {
+                var code = (codeRaw ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(code))
+                    continue;
+
+                if (!HasPermission(perms, code))
+                    return false;
+            }
+        }
+
+        if (item.RequiredAnyPermissions != null && item.RequiredAnyPermissions.Count > 0)
+        {
+            var any = false;
+
+            foreach (var codeRaw in item.RequiredAnyPermissions)
+            {
+                var code = (codeRaw ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(code))
+                    continue;
+
+                if (HasPermission(perms, code))
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (!any)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool HasPerm(string code)
+    {
+        var trimmed = (code ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return false;
+
+        if (CurrentUserContextService.Can(trimmed))
+            return true;
+
+        return HasPermission(_effectivePerms, trimmed);
+    }
+
+    private static bool HasPermission(HashSet<string> perms, string requestedCode)
+    {
+        if (perms == null || perms.Count == 0)
+            return false;
+
+        var req = (requestedCode ?? string.Empty).Trim();
+        if (req.Length == 0)
+            return false;
+
+        if (perms.Contains("*"))
+            return true;
+
+        if (perms.Contains(req))
+            return true;
+
+        var dotIndex = req.IndexOf('.');
+        if (dotIndex > 0)
+        {
+            var parts = req.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length >= 1)
+            {
+                var prefix = parts[0];
+                if (perms.Contains(prefix + ".*"))
+                    return true;
+
+                for (var i = 1; i < parts.Length; i++)
+                {
+                    prefix = prefix + "." + parts[i];
+                    if (perms.Contains(prefix + ".*"))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static List<AppMenuSection> CloneSections(List<AppMenuSection> source)
+    {
+        source ??= new List<AppMenuSection>();
+
+        return source.Select(s => new AppMenuSection
+        {
+            Key = s.Key,
+            Title = s.Title,
+            Icon = s.Icon,
+            ExpandedByDefault = s.ExpandedByDefault,
+            Items = s.Items?.ToList() ?? new List<AppMenuItem>()
+        }).ToList();
+    }
+
+    private static string BuildSectionKeyFromSectionKey(string sectionKey) => $"Section.{sectionKey}";
+    private static string BuildItemKey(string itemTitle) => $"Item.{itemTitle}";
+
+    private string GetSectionDisplayTitle(AppMenuSection section)
+    {
+        if (section == null)
+            return string.Empty;
+
+        var sectionKey = (section.Key ?? string.Empty).Trim();
+        if (sectionKey.Length == 0)
+            return section.Title ?? string.Empty;
+
+        var resxKey = BuildSectionKeyFromSectionKey(sectionKey);
+        var localized = L[resxKey];
+
+        if (string.Equals(localized.Value, resxKey, StringComparison.Ordinal))
+            return section.Title ?? string.Empty;
+
+        return localized.Value;
+    }
+
+    private string GetItemDisplayTitle(string itemTitle)
+    {
+        var key = BuildItemKey(itemTitle ?? string.Empty);
+        var localized = L[key];
+
+        if (string.Equals(localized.Value, key, StringComparison.Ordinal))
+            return itemTitle ?? string.Empty;
+
+        return localized.Value;
+    }
+
+    private async Task OnMenuDialogClickedAsync(AppMenuItem item)
+    {
+        try
+        {
+            var key = (item.DialogKey ?? string.Empty).Trim();
+
+            if (string.Equals(key, "TicketCreate", StringComparison.OrdinalIgnoreCase))
+            {
+                await OpenTicketCreateEntryPointAsync();
+                return;
+            }
+
+            Snackbar.Add(L["Dialog.UnknownKey", key].Value, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AppNavMenu] Nie udało się wykonać akcji menu (TicketCreate).");
+            Snackbar.Add(L["Dialog.CannotOpen"].Value, Severity.Error);
+        }
+    }
+
+    private Task OpenTicketCreateEntryPointAsync()
+    {
+        var returnUrl = BuildSafeReturnUrlFromCurrentLocation();
+
+        var url = "/tickets/new";
+        if (!string.IsNullOrWhiteSpace(returnUrl))
+            url += "?returnUrl=" + Uri.EscapeDataString(returnUrl);
+
+        NavigationManager.NavigateTo(url);
+        return Task.CompletedTask;
+    }
+
+    private string BuildSafeReturnUrlFromCurrentLocation()
+    {
+        try
+        {
+            var rel = "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+            rel = (rel ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(rel))
+                return "/";
+
+            if (!rel.StartsWith("/", StringComparison.Ordinal))
+                rel = "/" + rel;
+
+            if (rel.StartsWith("//", StringComparison.Ordinal))
+                return "/";
+
+            if (rel.Contains("\r") || rel.Contains("\n"))
+                return "/";
+
+            return rel;
+        }
+        catch
+        {
+            return "/";
+        }
+    }
+}

@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title.ContactData" xml:space="preserve">
+    <value>Dane kontaktowe</value>
+  </data>
+
+	<data name="Info.FillOnlyChangedFields" xml:space="preserve">
+    <value>Wpisz tylko pola, które chcesz zmienić. Puste pola zostaną pozostawione bez zmian.</value>
+  </data>
+	<data name="Info.ChangesSentToAdmin" xml:space="preserve">
+    <value>Zmiany są wysyłane do administratora.</value>
+  </data>
+
+	<data name="Loading.ContactData" xml:space="preserve">
+    <value>Trwa wczytywanie danych</value>
+  </data>
+
+	<data name="Warning.DomainOnly" xml:space="preserve">
+    <value>Ta strona jest dostępna tylko po zalogowaniu domenowym.</value>
+  </data>
+	<data name="Warning.ContactNotFound" xml:space="preserve">
+    <value>Nie znaleziono Twoich danych w bazie kontaktów. Skontaktuj się z działem IT.</value>
+  </data>
+
+	<data name="Section.NewData" xml:space="preserve">
+    <value>Nowe dane</value>
+  </data>
+	<data name="Section.AdditionalInfoForAdmin" xml:space="preserve">
+    <value>Dodatkowe informacje dla administratora</value>
+  </data>
+
+	<data name="Field.NewFirstName.Label" xml:space="preserve">
+    <value>Nowe imię</value>
+  </data>
+	<data name="Field.NewLastName.Label" xml:space="preserve">
+    <value>Nowe nazwisko</value>
+  </data>
+	<data name="Field.NewDepartment.Label" xml:space="preserve">
+    <value>Nowy dział</value>
+  </data>
+	<data name="Field.NewJobTitle.Label" xml:space="preserve">
+    <value>Nowe stanowisko</value>
+  </data>
+
+	<data name="Field.NewInternalPhone.Label" xml:space="preserve">
+    <value>Nowy telefon wewnętrzny</value>
+  </data>
+	<data name="Field.NewLandlinePhone.Label" xml:space="preserve">
+    <value>Nowy telefon stacjonarny</value>
+  </data>
+	<data name="Field.NewMobilePhone.Label" xml:space="preserve">
+    <value>Nowy telefon komórkowy</value>
+  </data>
+	<data name="Field.NewEmail.Label" xml:space="preserve">
+    <value>Nowy e-mail</value>
+  </data>
+
+	<data name="Field.Message.Label" xml:space="preserve">
+    <value>Wiadomość</value>
+  </data>
+	<data name="Field.Message.Placeholder" xml:space="preserve">
+    <value>Np. od kiedy obowiązują nowe dane</value>
+  </data>
+
+	<data name="Button.Cancel" xml:space="preserve">
+    <value>Anuluj</value>
+  </data>
+	<data name="Button.Send" xml:space="preserve">
+    <value>Wyślij</value>
+  </data>
+
+	<data name="Snackbar.UpdateRequestSent" xml:space="preserve">
+    <value>Wysłano prośbę o aktualizację danych do administratora.</value>
+  </data>
+	<data name="Snackbar.SendRequestError" xml:space="preserve">
+    <value>Wystąpił błąd podczas wysyłania zgłoszenia.</value>
+  </data>
+
+	<data name="Error.ResolveUserIdFailed" xml:space="preserve">
+    <value>Nie udało się ustalić identyfikatora użytkownika w systemie.</value>
+  </data>
+	<data name="Error.LoadContactFailed" xml:space="preserve">
+    <value>Wystąpił błąd podczas wczytywania danych.</value>
+  </data>
+	<data name="Error.MissingLoggedUserId" xml:space="preserve">
+    <value>Brak identyfikatora zalogowanego użytkownika. Odśwież stronę i spróbuj ponownie.</value>
+  </data>
+	<data name="Error.SendRequestFailed" xml:space="preserve">
+    <value>Nie udało się wysłać prośby o aktualizację danych.</value>
+  </data>
+</root>

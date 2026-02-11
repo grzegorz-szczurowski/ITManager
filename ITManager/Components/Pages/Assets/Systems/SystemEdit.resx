@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>Systemy</value>
+  </data>
+
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Szukaj systemów</value>
+  </data>
+
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Wyczyść filtry</value>
+  </data>
+
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Filtry zaawansowane</value>
+  </data>
+
+	<data name="All" xml:space="preserve">
+    <value>Wszystkie</value>
+  </data>
+
+	<data name="AddSystems" xml:space="preserve">
+    <value>Dodaj system</value>
+  </data>
+
+	<!-- Permissions / messages -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>Brak uprawnień do podglądu systemów.</value>
+  </data>
+
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>Brak uprawnień do edycji systemów.</value>
+  </data>
+
+	<data name="LoadingData" xml:space="preserve">
+    <value>Ładowanie danych...</value>
+  </data>
+
+	<data name="NoRecords" xml:space="preserve">
+    <value>Brak systemów spełniających wybrane kryteria.</value>
+  </data>
+
+	<!-- Errors -->
+	<data name="TimeoutError" xml:space="preserve">
+    <value>Przekroczono czas ładowania danych ({0}s). Sprawdź SQL, blokady oraz logi serwera.</value>
+  </data>
+
+	<data name="TimeoutSnackbar" xml:space="preserve">
+    <value>Przekroczono czas ładowania systemów.</value>
+  </data>
+
+	<data name="LoadFailedSnackbar" xml:space="preserve">
+    <value>Nie udało się wczytać systemów.</value>
+  </data>
+
+	<data name="LoadFailedTryLater" xml:space="preserve">
+    <value>Nie udało się wczytać systemów. Spróbuj ponownie później.</value>
+  </data>
+
+	<data name="GenericLoadError" xml:space="preserve">
+    <value>Wystąpił błąd podczas ładowania danych.</value>
+  </data>
+
+	<data name="OpenDialogError" xml:space="preserve">
+    <value>Nie udało się otworzyć szczegółów systemu.</value>
+  </data>
+
+	<!-- Columns -->
+	<data name="Col.SystemName" xml:space="preserve">
+    <value>Nazwa systemu</value>
+  </data>
+
+	<data name="Col.Type" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+
+	<data name="Col.Scope" xml:space="preserve">
+    <value>Zakres</value>
+  </data>
+
+	<data name="Col.Criticality" xml:space="preserve">
+    <value>Krytyczność</value>
+  </data>
+
+	<data name="Col.HostingType" xml:space="preserve">
+    <value>Typ hostingu</value>
+  </data>
+
+	<data name="Col.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<data name="Col.DataOwner" xml:space="preserve">
+    <value>Właściciel danych</value>
+  </data>
+
+	<data name="Col.PrimaryAdministrator" xml:space="preserve">
+    <value>Administrator główny</value>
+  </data>
+
+	<data name="Col.SecondaryAdministrator" xml:space="preserve">
+    <value>Administrator zapasowy</value>
+  </data>
+
+</root>

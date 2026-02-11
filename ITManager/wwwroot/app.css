@@ -1,0 +1,82 @@
+/* =========================================================
+   ITManager - layout dashboardowy
+   Drawer + AppBar zawsze widoczne
+   Scroll tylko treœci
+   ========================================================= */
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden; /* klucz: nie przewijamy strony */
+}
+
+/* MudBlazor layout: cala aplikacja w 100vh, bez scrolla na zewnatrz */
+.mud-layout,
+.mud-drawer-container {
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* MainContent jako kolumna: AppBar u gory, a przewijanie tylko w .th-content-scroll */
+.th-main-content {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Jedyny scroll w aplikacji */
+.th-content-scroll {
+    flex: 1 1 auto;
+    overflow: auto;
+}
+
+/* AppBar moze zostac sticky, ale nie jest to wymagane jesli scroll jest tylko w tresci.
+   Zostawiam dla bezpieczenstwa, gdyby ktos kiedys wrocil do scrolla na body. */
+.th-appbar {
+    position: sticky;
+    top: 0;
+    z-index: 1400;
+}
+
+/* Nie nadpisujemy .mud-drawer ani .mud-main-content.
+   MudBlazor sam zarzadza szerokosciami i responsywnoscia drawera. */
+
+/* Dodatkowy odstêp wizualny miêdzy AppBarem a g³ównym kontenerem treœci */
+.th-main-container {
+    margin-top: 16px;
+}
+
+/* ===== DataGrid optyka ===== */
+.mud-data-grid,
+.mud-data-grid-header,
+.mud-data-grid-row,
+.mud-data-grid-cell {
+    font-size: 10px !important;
+    line-height: 18px !important;
+}
+
+.mud-data-grid-cell {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+}
+
+.th-appbar-actions {
+    gap: 10px;
+}
+
+.th-badge-slot {
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+}
+
+/* opcjonalnie, jeœli nadal jest ciasno przy ma³ych rozdzielczoœciach */
+.th-appbar-actions .mud-icon-button {
+    margin-left: 2px;
+    margin-right: 2px;
+}

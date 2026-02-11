@@ -1,0 +1,947 @@
+﻿@page "/tickets/queue"
+@rendermode InteractiveServer
+
+@* File: Components/Pages/TicketsQueue.razor
+   Description: Kolejka ticketów: New, bez przypisanego operatora (kategoria dowolna).
+   Updated: 2025-12-26
+     - Layout ujednolicony do Devices: title + refresh icon (left) + right toolbar (search, clear, advanced) w jednej linii
+     - Clear jako outlined (jak w Devices)
+     - Loader jako overlay (spójnie z Devices)
+   Updated: 2025-12-27
+     - Stabilizacja: row click respektuje RBAC (Tickets.Edit)
+     - Ujednolicenie filtrów: Normalize dla Priority, case-insensitive dla Requester
+     - AssignToMe: blokada double click, stabilniejsze odświeżenie po assign
+   Updated: 2026-01-04
+     - FIX: kolejka nie filtruje już po pustej kategorii (pokazuje wszystkie New bez keepera)
+   Updated: 2026-01-09
+     - Persist filter state w query string (q, pr, req, ds, de, adv)
+     - Clear czyści też adv
+     - Hover/cursor tylko gdy klik aktywny (Tickets.Edit)
+   Updated: 2026-01-23
+     - UX: grid jak Contacts/Devices (procenty, fixed layout, ellipsis, bez horizontal scroll)
+     - Overlay ograniczony do kontenera listy
+   Updated: 2026-01-24
+     - TimeZone: wyświetlanie i filtrowanie dat w strefie użytkownika (TimeZoneService)
+   Updated: 2026-01-24
+     - Priority chips: paleta jak w TicketEdit (hex) + kolejność: red, orange, yellow, green, blue
+   Updated: 2026-02-02
+     - RBAC: dostosowanie do nowej architektury Tickets.View.* / Tickets.Edit.* / Tickets.Assign.* (bez Tickets.View)
+     - UX: hover/cursor zależny od _canOpenTicket (a nie globalnie od edit)
+   Updated: 2026-02-02
+     - UX/RBAC: ten sam mechanizm co TicketsIndex (isOkUser + HasAny + stałe PermTickets* + normalizacja Emergency -> Critical)
+   Version: 1.28 *@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.Extensions.Localization
+
+@inject TicketsService TicketsService
+@inject NavigationManager NavigationManager
+@inject CurrentUserContextService CurrentUserContextService
+@inject TimeZoneService TimeZoneService
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<TicketsQueue> L
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true"
+                  AlignItems="AlignItems.Center"
+                  Justify="Justify.SpaceBetween"
+                  Class="tickets-toolbar"
+                  Spacing="1">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadTicketsAsync"
+                               Disabled="@(_loading || !_canViewQueue)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="tickets-toolbar-right">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_loading || !_canViewQueue)"
+                              Class="ticket-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 ticket-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_loading || !_canViewQueue)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_loading || !_canViewQueue)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+
+        </MudStack>
+
+        @if (!_canViewQueue)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="tickets-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 ticket-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["PriorityLabel"]"
+                                           Value="@_selectedPriority"
+                                           ValueChanged="OnPriorityChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Disabled="@(_loading || !_canViewQueue)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var p in _priorityOptions)
+                                    {
+                                        <MudSelectItem Value="@p">@p</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudDateRangePicker Label="@L["RequestDateLabel"]"
+                                                    DateRange="@_requestDateRange"
+                                                    DateRangeChanged="OnRequestDateRangeChangedAsync"
+                                                    Dense="true"
+                                                    DisableToolbar="true"
+                                                    Clearable="true"
+                                                    Disabled="@(_loading || !_canViewQueue)" />
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["RequesterLabel"]"
+                                           Value="@_selectedRequester"
+                                           ValueChanged="OnRequesterChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_loading || !_canViewQueue)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var r in _requesterOptions)
+                                    {
+                                        <MudSelectItem Value="@r">@r</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudDataGrid T="Ticket"
+                             Class="tickets-grid"
+                             Items="@_filteredTickets"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Loading="false"
+                             RowClick="OnRowClick"
+                             RowClassFunc="GetRowClass"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false">
+
+                    <Columns>
+
+                        <PropertyColumn Property="t => t.TicketCode"
+                                        Title="@L["ColTicketNo"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:10%; text-align:center;"
+                                        CellStyle="width:10%; text-align:center;" />
+
+                        <TemplateColumn Title="@L["ColDate"]"
+                                        Sortable="true"
+                                        SortBy="@(t => t.TicketRequestDate ?? DateTime.MinValue)"
+                                        HeaderStyle="width:14%; text-align:center;"
+                                        CellStyle="width:14%; white-space:nowrap;">
+                            <CellTemplate Context="context">
+                                @FormatUtcToUser(context.Item.TicketRequestDate)
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="t => t.TicketRequesterName"
+                                        Title="@L["ColRequester"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:18%; text-align:center;"
+                                        CellStyle="width:18%;" />
+
+                        <PropertyColumn Property="t => t.TicketTitle"
+                                        Title="@L["ColTitle"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:36%; text-align:center;"
+                                        CellStyle="width:36%;" />
+
+                        <TemplateColumn Title="@L["ColPriority"]"
+                                        Sortable="true"
+                                        SortBy="@(t => t.WeightPriority)"
+                                        HeaderStyle="width:12%; text-align:center;"
+                                        CellStyle="width:12%; white-space:nowrap;">
+                            <CellTemplate Context="context">
+                                <MudChip T="string"
+                                         Color="Color.Default"
+                                         Variant="Variant.Filled"
+                                         Size="Size.Small"
+                                         Class="@($"priority-chip {GetPriorityChipClass(context.Item)}")">
+                                    @GetPriorityText(context.Item)
+                                </MudChip>
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="t => t.TicketStatusesName"
+                                        Title="@L["ColStatus"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:6%; text-align:center;"
+                                        CellStyle="width:6%; white-space:nowrap;" />
+
+                        <TemplateColumn Title="@L["ColActions"]"
+                                        Sortable="false"
+                                        HeaderStyle="width:14%; text-align:center;"
+                                        CellStyle="width:14%; text-align:right;">
+                            <CellTemplate Context="context">
+                                <MudButton Variant="Variant.Outlined"
+                                           Size="Size.Small"
+                                           Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.PersonAdd"
+                                           Disabled="@(!CanAssignToMe(context.Item))"
+                                           OnClick="@(async () => await AssignToMeAsync(context.Item))">
+                                    @L["AssignToMe"]
+                                </MudButton>
+                            </CellTemplate>
+                        </TemplateColumn>
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@_loading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="tickets-overlay">
+                    <MudPaper Class="pa-6 tickets-overlay-card">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">@L["Loading"]</MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .ticket-row {
+        min-height: 44px;
+    }
+
+        .ticket-row td,
+        .ticket-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+    .ticket-row-clickable:hover {
+        background-color: rgba(2, 136, 209, 0.12);
+        cursor: pointer;
+    }
+
+    .priority-chip {
+        min-width: 110px;
+        justify-content: center;
+        font-weight: 700;
+    }
+
+        /* Paleta jak w TicketEdit:
+           red: #D32F2F, orange: #F57C00, yellow: #F9A825, green: #2E7D32, blue: #0288D1 */
+        .priority-chip.pc-red,
+        .priority-chip.pc-red * {
+            background-color: #D32F2F !important;
+            color: #FFFFFF !important;
+        }
+
+        .priority-chip.pc-orange,
+        .priority-chip.pc-orange * {
+            background-color: #F57C00 !important;
+            color: #FFFFFF !important;
+        }
+
+        .priority-chip.pc-yellow,
+        .priority-chip.pc-yellow * {
+            background-color: #F9A825 !important;
+            color: #FFFFFF !important;
+        }
+
+        .priority-chip.pc-green,
+        .priority-chip.pc-green * {
+            background-color: #2E7D32 !important;
+            color: #FFFFFF !important;
+        }
+
+        .priority-chip.pc-blue,
+        .priority-chip.pc-blue * {
+            background-color: #0288D1 !important;
+            color: #FFFFFF !important;
+        }
+
+        .priority-chip.pc-none {
+            opacity: 0.85;
+        }
+
+    .ticket-search {
+        min-width: 400px;
+    }
+
+    .ticket-filters-panel {
+        border-radius: 8px;
+    }
+
+    .ticket-clear-btn {
+        border-width: 1px;
+    }
+
+    .tickets-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .tickets-overlay {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .tickets-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .tickets-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .tickets-grid th,
+    .tickets-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    @@media (max-width: 900px) {
+        .tickets-toolbar {
+            flex-wrap: wrap;
+        }
+
+        .tickets-toolbar-right {
+            width: 100%;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .ticket-search {
+            flex: 1 1 100%;
+            min-width: 220px;
+            max-width: none;
+        }
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+
+    // =========================
+    // RBAC (nowa architektura, styl nazw w projekcie: PermTickets*)
+    // =========================
+    private const string PermTicketsViewQueue = "Tickets.View.Queue";
+    private const string PermTicketsViewTeam = "Tickets.View.Team";
+
+    private const string PermTicketsEditAssigned = "Tickets.Edit.Assigned";
+    private const string PermTicketsEditTeam = "Tickets.Edit.Team";
+    private const string PermTicketsEditAll = "Tickets.Edit.All";
+
+    private const string PermTicketsAssignQueue = "Tickets.Assign.Queue";
+    private const string PermTicketsAssignTeam = "Tickets.Assign.Team";
+
+    private const string PriorityEmergency = "Emergency";
+    private const string PriorityCritical = "Critical";
+    private const string PriorityVeryHigh = "Very High";
+    private const string PriorityHigh = "High";
+    private const string PriorityMedium = "Medium";
+    private const string PriorityLow = "Low";
+
+    private bool _canViewQueue;
+    private bool _canOpenTicket;
+    private bool _canAssign;
+
+    private List<Ticket> _tickets = new();
+    private List<Ticket> _filteredTickets = new();
+
+    private bool _loading;
+    private bool _assigning;
+    private bool _showAdvancedFilters;
+    private bool _suppressUrlSync;
+
+    private string _loadError = string.Empty;
+
+    private string _searchText = string.Empty;
+
+    private string _selectedPriority = AllValue;
+    private string _selectedRequester = AllValue;
+
+    private DateRange _requestDateRange = new(null, null);
+
+    private List<string> _requesterOptions = new();
+
+    private TimeZoneInfo _userTimeZone = TimeZoneInfo.Local;
+
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "pr")] public string? Pr { get; set; }
+    [SupplyParameterFromQuery(Name = "req")] public string? Req { get; set; }
+    [SupplyParameterFromQuery(Name = "ds")] public string? Ds { get; set; }
+    [SupplyParameterFromQuery(Name = "de")] public string? De { get; set; }
+    [SupplyParameterFromQuery(Name = "adv")] public string? Adv { get; set; }
+
+    private readonly List<string> _priorityOptions = new()
+    {
+        PriorityCritical,
+        PriorityVeryHigh,
+        PriorityHigh,
+        PriorityMedium,
+        PriorityLow
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        bool HasAny(params string[] perms)
+            => perms != null && perms.Any(p => !string.IsNullOrWhiteSpace(p) && ctx.Has(p));
+
+        var isOkUser = ctx.IsAuthenticated && ctx.IsActive == true;
+
+        if (!isOkUser)
+        {
+            _canViewQueue = false;
+            NavigationManager.NavigateTo("/", replace: true);
+            return;
+        }
+
+        // Widoczność kolejki: operatorzy i liderzy
+        _canViewQueue = HasAny(
+            PermTicketsViewQueue,
+            PermTicketsViewTeam,
+            PermTicketsEditAssigned,
+            PermTicketsEditTeam,
+            PermTicketsEditAll,
+            PermTicketsAssignQueue,
+            PermTicketsAssignTeam);
+
+        if (!_canViewQueue)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+            NavigationManager.NavigateTo("/", replace: true);
+            return;
+        }
+
+        // Klik w wiersz: sens ma dla osób, które mogą wejść w szczegóły kolejki
+        _canOpenTicket = HasAny(
+            PermTicketsEditAssigned,
+            PermTicketsEditTeam,
+            PermTicketsEditAll,
+            PermTicketsAssignQueue,
+            PermTicketsAssignTeam,
+            PermTicketsViewQueue);
+
+        // Assign: dedykowane assigny albo mocny edit
+        _canAssign = HasAny(
+            PermTicketsAssignQueue,
+            PermTicketsAssignTeam,
+            PermTicketsEditTeam,
+            PermTicketsEditAll);
+
+        _userTimeZone = await TimeZoneService.GetUserTimeZoneAsync();
+
+        ApplyStateFromQueryOrDefaults();
+        await ReloadTicketsAsync();
+    }
+
+    private static string NormalizePriorityTag(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        if (string.Equals(s, PriorityEmergency, StringComparison.OrdinalIgnoreCase))
+            return PriorityCritical;
+
+        return s;
+    }
+
+    private void ApplyStateFromQueryOrDefaults()
+    {
+        _suppressUrlSync = true;
+
+        _showAdvancedFilters = string.Equals((Adv ?? string.Empty).Trim(), "1", StringComparison.Ordinal);
+
+        _searchText = (Q ?? string.Empty).Trim();
+        _selectedPriority = NormalizeOrAllPriority(Pr);
+        _selectedRequester = NormalizeOrAll(Req);
+
+        var start = ParseDateOrNull(Ds);
+        var end = ParseDateOrNull(De);
+        _requestDateRange = new DateRange(start, end);
+
+        _suppressUrlSync = false;
+    }
+
+    private static string NormalizeOrAll(string? value)
+    {
+        var v = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(v) ? AllValue : v;
+    }
+
+    private static string NormalizeOrAllPriority(string? value)
+    {
+        var v = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(v))
+            return AllValue;
+
+        return NormalizePriorityTag(v);
+    }
+
+    private static DateTime? ParseDateOrNull(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+
+        if (DateTime.TryParse(s.Trim(), out var dt))
+            return dt.Date;
+
+        return null;
+    }
+
+    private void ToggleAdvancedFilters()
+    {
+        _showAdvancedFilters = !_showAdvancedFilters;
+        SyncUrlWithState();
+    }
+
+    private async Task ReloadTicketsAsync()
+    {
+        if (!_canViewQueue)
+            return;
+
+        _loading = true;
+        _loadError = string.Empty;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var all = await TicketsService.GetTicketsAsync();
+
+            _tickets = (all ?? new List<Ticket>())
+                .Where(t => string.Equals((t.TicketStatusesName ?? string.Empty).Trim(), "New", StringComparison.OrdinalIgnoreCase))
+                .Where(t => t.TicketKeeperId is null || t.TicketKeeperId <= 0 || string.IsNullOrWhiteSpace(t.TicketOperatorName))
+                .ToList();
+
+            RebuildRequesterOptionsFromTickets();
+            NormalizeFiltersAgainstOptions();
+
+            RebuildFilteredTickets();
+            SyncUrlWithState();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+            NavigationManager.NavigateTo("/", replace: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketsQueue] ERROR: {ex}");
+            Snackbar.Add(L["LoadError"], Severity.Error);
+
+            _tickets = new();
+            _requesterOptions = new();
+            _filteredTickets = new();
+            _loadError = L["LoadError_Inline"];
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void RebuildRequesterOptionsFromTickets()
+    {
+        _requesterOptions = _tickets
+            .Select(t => (t.TicketRequesterName ?? string.Empty).Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstOptions()
+    {
+        if (_selectedRequester != AllValue && !_requesterOptions.Contains(_selectedRequester, StringComparer.OrdinalIgnoreCase))
+            _selectedRequester = AllValue;
+
+        if (_selectedPriority != AllValue && !_priorityOptions.Contains(_selectedPriority))
+            _selectedPriority = AllValue;
+    }
+
+    private void RebuildFilteredTickets()
+    {
+        _filteredTickets = BuildFilteredTickets();
+    }
+
+    private List<Ticket> BuildFilteredTickets()
+    {
+        IEnumerable<Ticket> query = _tickets;
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var text = _searchText.Trim();
+            query = query.Where(t =>
+                (t.TicketTitle?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.ProblemDescription?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.ProblemSolution?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.TicketRequesterName?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        if (_selectedPriority != AllValue)
+            query = query.Where(t => string.Equals(NormalizePriorityTag(t.PriorityTag), _selectedPriority, StringComparison.OrdinalIgnoreCase));
+
+        if (_selectedRequester != AllValue)
+            query = query.Where(t => string.Equals((t.TicketRequesterName ?? string.Empty).Trim(), _selectedRequester, StringComparison.OrdinalIgnoreCase));
+
+        if (_requestDateRange?.Start != null)
+        {
+            var startLocalDate = _requestDateRange.Start.Value.Date;
+            query = query.Where(t =>
+            {
+                var localDate = GetLocalDateOnlyFromUtc(t.TicketRequestDate);
+                return localDate != null && localDate.Value >= startLocalDate;
+            });
+        }
+
+        if (_requestDateRange?.End != null)
+        {
+            var endLocalDate = _requestDateRange.End.Value.Date;
+            query = query.Where(t =>
+            {
+                var localDate = GetLocalDateOnlyFromUtc(t.TicketRequestDate);
+                return localDate != null && localDate.Value <= endLocalDate;
+            });
+        }
+
+        return query
+            .OrderByDescending(t => t.WeightPriority)
+            .ThenBy(t => t.TicketRequestDate ?? DateTime.MaxValue)
+            .ToList();
+    }
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredTickets();
+        SyncUrlWithState();
+        return Task.CompletedTask;
+    }
+
+    private Task OnPriorityChangedAsync(string value)
+    {
+        _selectedPriority = string.IsNullOrWhiteSpace(value) ? AllValue : NormalizePriorityTag(value);
+        RebuildFilteredTickets();
+        SyncUrlWithState();
+        return Task.CompletedTask;
+    }
+
+    private Task OnRequesterChangedAsync(string value)
+    {
+        _selectedRequester = string.IsNullOrWhiteSpace(value) ? AllValue : value.Trim();
+        RebuildFilteredTickets();
+        SyncUrlWithState();
+        return Task.CompletedTask;
+    }
+
+    private Task OnRequestDateRangeChangedAsync(DateRange range)
+    {
+        _requestDateRange = range ?? new DateRange(null, null);
+        RebuildFilteredTickets();
+        SyncUrlWithState();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+        _selectedPriority = AllValue;
+        _selectedRequester = AllValue;
+        _requestDateRange = new DateRange(null, null);
+        _showAdvancedFilters = false;
+
+        RebuildFilteredTickets();
+        SyncUrlWithState();
+    }
+
+    private void SyncUrlWithState()
+    {
+        if (_suppressUrlSync)
+            return;
+
+        var query = new Dictionary<string, string>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            query["q"] = _searchText.Trim();
+
+        if (_selectedPriority != AllValue)
+            query["pr"] = NormalizePriorityTag(_selectedPriority);
+
+        if (_selectedRequester != AllValue)
+            query["req"] = _selectedRequester;
+
+        if (_requestDateRange?.Start != null)
+            query["ds"] = _requestDateRange.Start.Value.ToString("yyyy-MM-dd");
+
+        if (_requestDateRange?.End != null)
+            query["de"] = _requestDateRange.End.Value.ToString("yyyy-MM-dd");
+
+        if (_showAdvancedFilters)
+            query["adv"] = "1";
+
+        var url = query.Count == 0
+            ? "/tickets/queue"
+            : QueryHelpers.AddQueryString("/tickets/queue", query);
+
+        var currentPathAndQuery = new Uri(NavigationManager.Uri).PathAndQuery;
+        if (string.Equals(currentPathAndQuery, url, StringComparison.Ordinal))
+            return;
+
+        NavigationManager.NavigateTo(url, replace: true);
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<Ticket> args)
+    {
+        if (args?.Item == null)
+            return;
+
+        if (_loading)
+            return;
+
+        if (!_canOpenTicket)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return;
+        }
+
+        var returnUrl = Uri.EscapeDataString(new Uri(NavigationManager.Uri).PathAndQuery);
+        NavigationManager.NavigateTo($"/tickets/{args.Item.Id}?returnUrl={returnUrl}");
+    }
+
+    private string GetPriorityText(Ticket ticket)
+    {
+        if (ticket == null || ticket.WeightPriority <= 0)
+            return "-";
+
+        var clamped = Math.Max(1, Math.Min(120, ticket.WeightPriority));
+        var tagRaw = (ticket.PriorityTag ?? string.Empty).Trim();
+        var tag = NormalizePriorityTag(tagRaw);
+        if (string.IsNullOrWhiteSpace(tag))
+            tag = L["PriorityFallback"];
+
+        return $"{tag} ({clamped})";
+    }
+
+    private string GetPriorityChipClass(Ticket t)
+    {
+        var tag = NormalizePriorityTag(t?.PriorityTag);
+
+        return tag switch
+        {
+            PriorityCritical => "pc-red",
+            PriorityVeryHigh => "pc-orange",
+            PriorityHigh => "pc-yellow",
+            PriorityMedium => "pc-green",
+            PriorityLow => "pc-blue",
+            _ => "pc-none"
+        };
+    }
+
+    private string GetRowClass(Ticket ticket, int rowNumber)
+    {
+        _ = ticket;
+        _ = rowNumber;
+
+        return _canOpenTicket ? "ticket-row ticket-row-clickable" : "ticket-row";
+    }
+
+    private static bool IsAssigned(Ticket ticket)
+    {
+        if (ticket is null)
+            return false;
+
+        if (ticket.TicketKeeperId != null && ticket.TicketKeeperId > 0)
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(ticket.TicketOperatorName))
+            return true;
+
+        return false;
+    }
+
+    private bool CanAssignToMe(Ticket ticket)
+    {
+        if (_loading || _assigning)
+            return false;
+
+        if (!_canAssign)
+            return false;
+
+        if (ticket is null)
+            return false;
+
+        if (IsAssigned(ticket))
+            return false;
+
+        return true;
+    }
+
+    private async Task AssignToMeAsync(Ticket ticket)
+    {
+        if (ticket is null)
+            return;
+
+        if (!CanAssignToMe(ticket))
+            return;
+
+        _assigning = true;
+        _loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await TicketsService.AssignTicketToCurrentUserAsync(ticket.Id);
+            Snackbar.Add(L["Msg_AssignedToMe", ticket.Id].Value, Severity.Success);
+            await ReloadTicketsAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoAssignPermission"], Severity.Warning);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            await ReloadTicketsAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TicketsQueue] AssignToMe ERROR: {ex}");
+            Snackbar.Add(L["AssignError"], Severity.Error);
+        }
+        finally
+        {
+            _assigning = false;
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string FormatUtcToUser(DateTime? utc)
+    {
+        if (!utc.HasValue)
+            return string.Empty;
+
+        var safeUtc = EnsureUtc(utc.Value);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(safeUtc, _userTimeZone);
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private DateTime? GetLocalDateOnlyFromUtc(DateTime? utc)
+    {
+        if (!utc.HasValue)
+            return null;
+
+        var safeUtc = EnsureUtc(utc.Value);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(safeUtc, _userTimeZone);
+        return local.Date;
+    }
+
+    private static DateTime EnsureUtc(DateTime dt)
+    {
+        if (dt.Kind == DateTimeKind.Utc)
+            return dt;
+
+        return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+    }
+
+    // =========================
+    // Lista uprawnień używanych w tym pliku
+    // =========================
+    // Tickets.View.Queue
+    // Tickets.View.Team
+    // Tickets.Edit.Assigned
+    // Tickets.Edit.Team
+    // Tickets.Edit.All
+    // Tickets.Assign.Queue
+    // Tickets.Assign.Team
+}

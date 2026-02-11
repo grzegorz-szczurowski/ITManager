@@ -1,0 +1,453 @@
+﻿@page "/reports"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Reports.View")]
+
+@* File: Components/Pages/Reports/ReportsPortal.razor
+   Description: Portal raportów. Lista raportów w MudDataGrid. Klik w wiersz nawigacja do raportu.
+   Security: Reports.View
+   Updated: 2026-01-21 - Localization: IStringLocalizer + pl-PL/en-US resx.
+   Updated: 2026-01-25 - wersja 1.22:
+     - Security: page-level policy Authorize (Perm:Reports.View)
+     - RBAC: spójnie z resztą portalu: ctx.Has("Reports.View")
+     - UX: toolbar jak UsersIndex (refresh przy tytule, search zawsze widoczny, clear, advanced filters)
+     - Grid: fixed layout + ellipsis, procentowe szerokości, brak horizontal scroll
+     - Overlay: ograniczony do kontenera listy
+     - Logging: ILogger zamiast Console
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using ITManager.Services.Auth
+
+@inject CurrentUserContextService CurrentUserContextService
+@inject NavigationManager Navigation
+@inject IStringLocalizer<ReportsPortal> L
+@inject ISnackbar Snackbar
+@inject ILogger<ReportsPortal> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h5">@L["Title"]</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Primary">
+                        @L["Subtitle"]
+                    </MudText>
+                </MudStack>
+
+                <MudTooltip Text="@L["Refresh"]">
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Primary"
+                                   Size="Size.Medium"
+                                   Variant="Variant.Text"
+                                   Class="ml-1"
+                                   OnClick="ReloadAsync"
+                                   Disabled="@(_loading || !_canViewReports)" />
+                </MudTooltip>
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_loading || !_canViewReports)"
+                              Class="reports-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 reports-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_loading || !_canViewReports)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_loading || !_canViewReports)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewReports)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoAccess", "Reports.View"] <b>Reports.View</b>
+            </MudAlert>
+        }
+        else
+        {
+            <div class="reports-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 reports-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Filter_Category"]"
+                                           Value="@_selectedCategory"
+                                           ValueChanged="OnCategoryChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@_loading">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var c in _lookupsCategories)
+                                    {
+                                        <MudSelectItem Value="@c">@c</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudPaper Class="pa-0" Elevation="0">
+
+                    <MudDataGrid T="ReportCatalogItem"
+                                 @ref="_grid"
+                                 Class="reports-grid"
+                                 Items="@_filteredReports"
+                                 Dense="true"
+                                 Hover="true"
+                                 Bordered="false"
+                                 Elevation="0"
+                                 Breakpoint="Breakpoint.Sm"
+                                 HorizontalScrollbar="false"
+                                 RowClick="OnRowClick"
+                                 RowClassFunc="GetRowClass"
+                                 Height="420px"
+                                 SortMode="SortMode.Multiple">
+
+                        <Columns>
+
+                            @* SUMA = 100% *@
+                            <PropertyColumn Property="x => GetCategoryText(x)"
+                                            SortBy="x => GetCategoryText(x)"
+                                            Title="@L["ColCategory"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:18%;"
+                                            CellStyle="width:18%;"
+                                            InitialDirection="SortDirection.Ascending" />
+
+                            <PropertyColumn Property="x => GetNameText(x)"
+                                            SortBy="x => GetNameText(x)"
+                                            Title="@L["ColName"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:22%;"
+                                            CellStyle="width:22%;"
+                                            InitialDirection="SortDirection.Ascending" />
+
+                            <PropertyColumn Property="x => GetDescriptionText(x)"
+                                            SortBy="x => GetDescriptionText(x)"
+                                            Title="@L["ColDescription"]"
+                                            Sortable="true"
+                                            HeaderStyle="width:60%;"
+                                            CellStyle="width:60%;" />
+
+                        </Columns>
+
+                        <NoRecordsContent>
+                            <MudText Typo="Typo.body2" Class="px-2 py-2">
+                                @L["NoReports"]
+                            </MudText>
+                        </NoRecordsContent>
+
+                    </MudDataGrid>
+
+                </MudPaper>
+
+                <MudOverlay Visible="@_loading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="reports-overlay">
+                    <MudPaper Class="pa-6 reports-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @L["Loading"]
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .report-row-clickable {
+        cursor: pointer;
+    }
+
+    .reports-search {
+        min-width: 400px;
+    }
+
+    .reports-filters-panel {
+        border-radius: 8px;
+    }
+
+    .reports-clear-btn {
+        border-width: 1px;
+    }
+
+    .reports-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .reports-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .reports-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .reports-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .reports-grid th,
+    .reports-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+
+    private bool _ready;
+    private bool _loading = true;
+    private bool _canViewReports;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private string _selectedCategory = AllValue;
+    private List<string> _lookupsCategories = new();
+
+    private readonly List<ReportCatalogItem> _allReports = new()
+    {
+        new ReportCatalogItem
+        {
+            Key = "prints",
+            CategoryKey = "Rep_Prints_Category",
+            NameKey = "Rep_Prints_Name",
+            DescriptionKey = "Rep_Prints_Desc",
+            Href = "/reports/prints"
+        }
+    };
+
+    private List<ReportCatalogItem> _filteredReports = new();
+    private MudDataGrid<ReportCatalogItem>? _grid;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            _canViewReports = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Reports.View");
+            _ready = true;
+
+            if (!_canViewReports)
+                return;
+
+            BuildLookups();
+            NormalizeFilters();
+            RebuildFiltered();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Reports] Init error.");
+            _loadError = L["LoadError"];
+            Snackbar.Add(L["LoadError"], Severity.Error);
+
+            _filteredReports = new();
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task ReloadAsync()
+    {
+        _loadError = string.Empty;
+
+        BuildLookups();
+        NormalizeFilters();
+        RebuildFiltered();
+
+        return Task.CompletedTask;
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFiltered();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+        _selectedCategory = AllValue;
+        _showAdvancedFilters = false;
+
+        RebuildFiltered();
+    }
+
+    private Task OnCategoryChangedAsync(string value)
+    {
+        _selectedCategory = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFiltered();
+        return Task.CompletedTask;
+    }
+
+    private Task OnRowClick(DataGridRowClickEventArgs<ReportCatalogItem> args)
+    {
+        if (!_canViewReports)
+            return Task.CompletedTask;
+
+        var item = args?.Item;
+        if (item is null)
+            return Task.CompletedTask;
+
+        if (!string.IsNullOrWhiteSpace(item.Href))
+            Navigation.NavigateTo(item.Href);
+
+        return Task.CompletedTask;
+    }
+
+    private string GetRowClass(ReportCatalogItem item, int index)
+    {
+        _ = item;
+        _ = index;
+        return "report-row-clickable";
+    }
+
+    private void BuildLookups()
+    {
+        _lookupsCategories = _allReports
+            .Select(x => GetCategoryText(x).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFilters()
+    {
+        if (_selectedCategory != AllValue
+            && !_lookupsCategories.Contains(_selectedCategory, StringComparer.OrdinalIgnoreCase))
+        {
+            _selectedCategory = AllValue;
+        }
+    }
+
+    private void RebuildFiltered()
+        => _filteredReports = BuildFiltered().ToList();
+
+    private IEnumerable<ReportCatalogItem> BuildFiltered()
+    {
+        IEnumerable<ReportCatalogItem> q = _allReports;
+
+        if (_selectedCategory != AllValue)
+            q = q.Where(x => string.Equals(GetCategoryText(x).Trim(), _selectedCategory.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            q = q.Where(x =>
+                ContainsIgnoreCase(GetCategoryText(x), term) ||
+                ContainsIgnoreCase(GetNameText(x), term) ||
+                ContainsIgnoreCase(GetDescriptionText(x), term));
+        }
+
+        return q;
+    }
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetCategoryText(ReportCatalogItem item)
+        => item is null ? string.Empty : L[item.CategoryKey].Value;
+
+    private string GetNameText(ReportCatalogItem item)
+        => item is null ? string.Empty : L[item.NameKey].Value;
+
+    private string GetDescriptionText(ReportCatalogItem item)
+        => item is null ? string.Empty : (string.IsNullOrWhiteSpace(item.DescriptionKey) ? string.Empty : L[item.DescriptionKey].Value);
+
+    private sealed class ReportCatalogItem
+    {
+        public required string Key { get; set; }
+        public required string CategoryKey { get; set; }
+        public required string NameKey { get; set; }
+        public string? DescriptionKey { get; set; }
+        public string? Href { get; set; }
+    }
+}

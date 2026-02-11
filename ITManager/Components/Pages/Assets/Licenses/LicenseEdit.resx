@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Permissions -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view licenses.</value>
+  </data>
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>You do not have permission to edit licenses.</value>
+  </data>
+
+	<!-- Loading / errors -->
+	<data name="Loading" xml:space="preserve">
+    <value>Loading...</value>
+  </data>
+	<data name="LookupsLoadFailed" xml:space="preserve">
+    <value>Cannot load lookup data.</value>
+  </data>
+	<data name="LoadFailed" xml:space="preserve">
+    <value>Cannot load license.</value>
+  </data>
+	<data name="LoadFailedTryLater" xml:space="preserve">
+    <value>Cannot load license. Please try again later.</value>
+  </data>
+	<data name="NotFoundFmt" xml:space="preserve">
+    <value>License not found (ID: {0}).</value>
+  </data>
+
+	<!-- Header / summary -->
+	<data name="NewTitle" xml:space="preserve">
+    <value>New license</value>
+  </data>
+	<data name="License" xml:space="preserve">
+    <value>License</value>
+  </data>
+	<data name="SubtitleUserFmt" xml:space="preserve">
+    <value>User: {0}</value>
+  </data>
+	<data name="SubtitleDefault" xml:space="preserve">
+    <value>Details</value>
+  </data>
+	<data name="CloseTooltip" xml:space="preserve">
+    <value>Close</value>
+  </data>
+
+	<!-- Tabs -->
+	<data name="Tabs.General" xml:space="preserve">
+    <value>General</value>
+  </data>
+	<data name="Tabs.Subscription" xml:space="preserve">
+    <value>Subscription</value>
+  </data>
+	<data name="Tabs.Details" xml:space="preserve">
+    <value>Details</value>
+  </data>
+
+	<!-- Fields -->
+	<data name="Fields.Type" xml:space="preserve">
+    <value>Type</value>
+  </data>
+	<data name="Fields.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Fields.User" xml:space="preserve">
+    <value>User</value>
+  </data>
+	<data name="Fields.Producer" xml:space="preserve">
+    <value>Producer</value>
+  </data>
+	<data name="Fields.Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Fields.SubscriptionStart" xml:space="preserve">
+    <value>Subscription start</value>
+  </data>
+	<data name="Fields.SubscriptionEnd" xml:space="preserve">
+    <value>Subscription end</value>
+  </data>
+	<data name="Fields.Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+	<data name="Fields.InventoryNo" xml:space="preserve">
+    <value>Inventory No.</value>
+  </data>
+	<data name="Fields.Note" xml:space="preserve">
+    <value>Note</value>
+  </data>
+
+	<!-- Copy -->
+	<data name="CopyInventoryNo" xml:space="preserve">
+    <value>Copy inventory number</value>
+  </data>
+	<data name="CopiedFmt" xml:space="preserve">
+    <value>Copied: {0}</value>
+  </data>
+	<data name="CopyFailed" xml:space="preserve">
+    <value>Copy failed.</value>
+  </data>
+
+	<!-- Edit mode -->
+	<data name="EnableEdit" xml:space="preserve">
+    <value>Enable edit</value>
+  </data>
+	<data name="Lock" xml:space="preserve">
+    <value>Lock</value>
+  </data>
+	<data name="CancelChanges" xml:space="preserve">
+    <value>Cancel changes</value>
+  </data>
+	<data name="RevertFailed" xml:space="preserve">
+    <value>Cannot revert changes.</value>
+  </data>
+
+	<!-- Save / close -->
+	<data name="Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+	<data name="Saved" xml:space="preserve">
+    <value>Saved.</value>
+  </data>
+	<data name="SaveFailed" xml:space="preserve">
+    <value>Save failed.</value>
+  </data>
+	<data name="SaveError" xml:space="preserve">
+    <value>Unexpected error while saving.</value>
+  </data>
+	<data name="Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+
+	<!-- Unsaved changes dialog -->
+	<data name="UnsavedTitle" xml:space="preserve">
+    <value>Unsaved changes</value>
+  </data>
+	<data name="UnsavedMessage" xml:space="preserve">
+    <value>You have unsaved changes. Discard them and close?</value>
+  </data>
+	<data name="DiscardAndClose" xml:space="preserve">
+    <value>Discard and close</value>
+  </data>
+	<data name="Stay" xml:space="preserve">
+    <value>Stay</value>
+  </data>
+
+</root>

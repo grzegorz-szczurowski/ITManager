@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="NoAccess.View" xml:space="preserve"><value>No permission to view SIM cards.</value></data>
+	<data name="NoAccess.Edit" xml:space="preserve"><value>No permission to edit.</value></data>
+
+	<data name="Loading.Data" xml:space="preserve"><value>Loading data...</value></data>
+	<data name="Saving" xml:space="preserve"><value>Saving...</value></data>
+
+	<data name="Common.Dash" xml:space="preserve"><value>-</value></data>
+
+	<data name="Badge.ReadOnly" xml:space="preserve"><value>Read-only</value></data>
+	<data name="Badge.Unsaved" xml:space="preserve"><value>Unsaved</value></data>
+
+	<data name="Field.Type" xml:space="preserve"><value>Type</value></data>
+	<data name="Field.Operator" xml:space="preserve"><value>Operator</value></data>
+	<data name="Field.Plan" xml:space="preserve"><value>Plan</value></data>
+	<data name="Field.Status" xml:space="preserve"><value>Status</value></data>
+	<data name="Field.User" xml:space="preserve"><value>User</value></data>
+	<data name="Field.MobileNumber" xml:space="preserve"><value>Mobile number</value></data>
+	<data name="Field.SimCardNumber" xml:space="preserve"><value>SIM card number</value></data>
+	<data name="Field.NoteLabelBlank" xml:space="preserve"><value> </value></data>
+
+	<data name="Field.MobileNumberShort" xml:space="preserve"><value>Mobile</value></data>
+	<data name="Field.SimCardNumberShort" xml:space="preserve"><value>SIM</value></data>
+
+	<data name="Tooltip.CopyMobile" xml:space="preserve"><value>Copy mobile number</value></data>
+	<data name="Tooltip.CopySim" xml:space="preserve"><value>Copy SIM card number</value></data>
+
+	<data name="Clipboard.Mobile" xml:space="preserve"><value>Mobile number</value></data>
+	<data name="Clipboard.Sim" xml:space="preserve"><value>SIM card number</value></data>
+
+	<data name="Tab.General" xml:space="preserve"><value>General</value></data>
+	<data name="Tab.Numbers" xml:space="preserve"><value>Numbers</value></data>
+	<data name="Tab.Note" xml:space="preserve"><value>Note</value></data>
+	<data name="Tab.History" xml:space="preserve"><value>History</value></data>
+
+	<data name="History.Todo" xml:space="preserve"><value>History: to be implemented (change log, audit, events).</value></data>
+
+	<data name="Button.EnableEdit" xml:space="preserve"><value>Enable edit</value></data>
+	<data name="Button.Lock" xml:space="preserve"><value>Lock</value></data>
+	<data name="Button.Save" xml:space="preserve"><value>Save</value></data>
+	<data name="Button.Close" xml:space="preserve"><value>Close</value></data>
+
+	<data name="Title.SimPrefix" xml:space="preserve"><value>SIM</value></data>
+	<data name="Title.SimCard" xml:space="preserve"><value>SIM card</value></data>
+	<data name="Subtitle.OperatorPlan" xml:space="preserve"><value>{0} (Plan: {1})</value></data>
+
+	<data name="Error.LoadLookups" xml:space="preserve"><value>Failed to load field dictionaries.</value></data>
+	<data name="Error.LoadSimCard" xml:space="preserve"><value>Failed to load SIM card.</value></data>
+	<data name="Error.NotFoundById" xml:space="preserve"><value>SIM card not found for Id: {0}</value></data>
+	<data name="Error.LoadSimCardTryLater" xml:space="preserve"><value>Failed to load SIM card. Please try again later.</value></data>
+
+	<data name="Error.Save" xml:space="preserve"><value>Failed to save changes.</value></data>
+	<data name="Error.SaveGeneric" xml:space="preserve"><value>Error while saving.</value></data>
+
+	<data name="Toast.Saved" xml:space="preserve"><value>Saved.</value></data>
+	<data name="Toast.Copied" xml:space="preserve"><value>Copied: {0}</value></data>
+
+	<data name="Error.CopyClipboard" xml:space="preserve"><value>Failed to copy to clipboard.</value></data>
+
+	<data name="Dialog.Unsaved.Title" xml:space="preserve"><value>Unsaved changes</value></data>
+	<data name="Dialog.Unsaved.Message" xml:space="preserve"><value>You have unsaved changes. Leave and discard changes?</value></data>
+	<data name="Dialog.Unsaved.YesDiscard" xml:space="preserve"><value>Discard and leave</value></data>
+	<data name="Dialog.Unsaved.NoStay" xml:space="preserve"><value>Stay</value></data>
+</root>

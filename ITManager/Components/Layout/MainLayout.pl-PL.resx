@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Ui.LoadingPortal" xml:space="preserve">
+    <value>Ładowanie portalu</value>
+  </data>
+
+	<data name="Language.EN" xml:space="preserve">
+    <value>EN</value>
+  </data>
+	<data name="Language.PL" xml:space="preserve">
+    <value>PL</value>
+  </data>
+
+	<data name="UnknownUser" xml:space="preserve">
+    <value>Nieznany</value>
+  </data>
+
+	<data name="AppTitle" xml:space="preserve">
+    <value>ITManager</value>
+  </data>
+
+	<data name="LogoAlt" xml:space="preserve">
+    <value>Logo Tristone</value>
+  </data>
+
+	<data name="ToggleThemeTitle" xml:space="preserve">
+    <value>Przełącz motyw</value>
+  </data>
+
+	<data name="MyAccountTooltip" xml:space="preserve">
+    <value>Moje konto</value>
+  </data>
+
+	<data name="Errors.ReadDrawerState" xml:space="preserve">
+    <value>Błąd odczytu stanu menu bocznego</value>
+  </data>
+	<data name="Errors.SaveDrawerState" xml:space="preserve">
+    <value>Błąd zapisu stanu menu bocznego</value>
+  </data>
+
+	<data name="Errors.ReadDarkMode" xml:space="preserve">
+    <value>Błąd odczytu trybu ciemnego</value>
+  </data>
+	<data name="Errors.SaveDarkMode" xml:space="preserve">
+    <value>Błąd zapisu trybu ciemnego</value>
+  </data>
+
+	<data name="Errors.ChangeLanguage" xml:space="preserve">
+    <value>Błąd zmiany języka</value>
+  </data>
+
+	<data name="Errors.RegisterVisit" xml:space="preserve">
+    <value>Błąd logowania wizyty</value>
+  </data>
+</root>

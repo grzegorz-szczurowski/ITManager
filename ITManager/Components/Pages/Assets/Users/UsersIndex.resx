@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>Users</value>
+  </data>
+
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Search in users</value>
+  </data>
+
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Clear filters</value>
+  </data>
+
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Advanced filters</value>
+  </data>
+
+	<data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+
+	<data name="Yes" xml:space="preserve">
+    <value>Yes</value>
+  </data>
+
+	<data name="No" xml:space="preserve">
+    <value>No</value>
+  </data>
+
+	<!-- Permissions / messages -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view the users list.</value>
+  </data>
+
+	<data name="NoEditPermission" xml:space="preserve">
+    <value>You do not have permission to edit users.</value>
+  </data>
+
+	<data name="LoadingData" xml:space="preserve">
+    <value>Loading data...</value>
+  </data>
+
+	<data name="NoRecords" xml:space="preserve">
+    <value>No users found for current filters.</value>
+  </data>
+
+	<!-- Errors -->
+	<data name="TimeoutError" xml:space="preserve">
+    <value>Timeout while loading data ({0}s). Check SQL and server logs.</value>
+  </data>
+
+	<data name="TimeoutSnackbar" xml:space="preserve">
+    <value>Timeout while loading users.</value>
+  </data>
+
+	<data name="LoadFailedSnackbar" xml:space="preserve">
+    <value>Failed to load users.</value>
+  </data>
+
+	<data name="LoadFailedTryLater" xml:space="preserve">
+    <value>Failed to load users. Please try again later.</value>
+  </data>
+
+	<data name="GenericLoadError" xml:space="preserve">
+    <value>Error while loading data.</value>
+  </data>
+
+	<data name="InvalidIdError" xml:space="preserve">
+    <value>Cannot open edit because the record Id is invalid.</value>
+  </data>
+
+	<!-- Filters -->
+	<data name="Filter.Department" xml:space="preserve">
+    <value>Department</value>
+  </data>
+
+	<data name="Filter.Title" xml:space="preserve">
+    <value>Title</value>
+  </data>
+
+	<data name="Filter.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<data name="Filter.Operator" xml:space="preserve">
+    <value>Operator</value>
+  </data>
+
+	<data name="Filter.Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+
+	<!-- Columns -->
+	<data name="Col.DisplayName" xml:space="preserve">
+    <value>Display name</value>
+  </data>
+
+	<data name="Col.FirstName" xml:space="preserve">
+    <value>First name</value>
+  </data>
+
+	<data name="Col.LastName" xml:space="preserve">
+    <value>Last name</value>
+  </data>
+
+	<data name="Col.Department" xml:space="preserve">
+    <value>Department</value>
+  </data>
+
+	<data name="Col.Title" xml:space="preserve">
+    <value>Title</value>
+  </data>
+
+	<data name="Col.Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+
+	<data name="Col.Phone" xml:space="preserve">
+    <value>Phone</value>
+  </data>
+
+	<data name="Col.Mobile" xml:space="preserve">
+    <value>Mobile</value>
+  </data>
+
+	<data name="Col.AccountType" xml:space="preserve">
+    <value>Account type</value>
+  </data>
+
+	<data name="Col.Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+
+	<data name="Col.Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+</root>

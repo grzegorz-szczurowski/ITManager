@@ -1,0 +1,326 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="DashboardTitle" xml:space="preserve">
+    <value>Dashboardy</value>
+  </data>
+	<data name="DashboardSubtitle" xml:space="preserve">
+    <value>Podsumowanie</value>
+  </data>
+	<data name="Refresh" xml:space="preserve">
+    <value>Odśwież</value>
+  </data>
+	<data name="LoadingData" xml:space="preserve">
+    <value>Ładowanie danych</value>
+  </data>
+
+	<!-- Generic -->
+	<data name="NoData" xml:space="preserve">
+    <value>Brak danych</value>
+  </data>
+	<data name="ShowMore" xml:space="preserve">
+    <value>Pokaż więcej</value>
+  </data>
+	<data name="NA" xml:space="preserve">
+    <value>n/d</value>
+  </data>
+	<data name="NoTitle" xml:space="preserve">
+    <value>(bez tytułu)</value>
+  </data>
+
+	<!-- DB errors -->
+	<data name="MissingConnectionString" xml:space="preserve">
+    <value>Brak connection string: ITManagerConnection</value>
+  </data>
+	<data name="DbLoadFailed" xml:space="preserve">
+    <value>Nie udało się wczytać danych z bazy.</value>
+  </data>
+
+	<!-- Formatting -->
+	<data name="CurrencyPLN" xml:space="preserve">
+    <value>PLN</value>
+  </data>
+	<data name="PercentFormat" xml:space="preserve">
+    <value>{0:N1}%</value>
+  </data>
+	<data name="ZeroPercent" xml:space="preserve">
+    <value>0%</value>
+  </data>
+
+	<!-- Tickets -->
+	<data name="Tickets" xml:space="preserve">
+    <value>Zgłoszenia</value>
+  </data>
+	<data name="TicketsSchemaMissing" xml:space="preserve">
+    <value>Zgłoszenia: brakuje wymaganych tabel lub kolumn (dbo.tickets + dbo.ticket_actions + dbo.ticket_statuses).</value>
+  </data>
+
+	<data name="TicketsOpened30" xml:space="preserve">
+    <value>Otwarte (30 dni)</value>
+  </data>
+	<data name="TicketsOpened30Hint" xml:space="preserve">
+    <value>Liczone po dacie utworzenia zgłoszenia</value>
+  </data>
+	<data name="TrendTicketsOpened30Tooltip" xml:space="preserve">
+    <value>Porównanie do poprzednich 30 dni</value>
+  </data>
+
+	<data name="TicketsClosed30" xml:space="preserve">
+    <value>Zamknięte (30 dni)</value>
+  </data>
+	<data name="TicketsClosed30Hint" xml:space="preserve">
+    <value>Liczone po dacie zamknięcia oraz bieżącym statusie</value>
+  </data>
+	<data name="TrendTicketsClosed30Tooltip" xml:space="preserve">
+    <value>Porównanie do poprzednich 30 dni</value>
+  </data>
+
+	<data name="TicketsQueue" xml:space="preserve">
+    <value>Kolejka</value>
+  </data>
+	<data name="TicketsQueueHint" xml:space="preserve">
+    <value>Nowe i przypisane</value>
+  </data>
+	<data name="TrendTicketsQueueTooltip" xml:space="preserve">
+    <value>Przeniesione do kolejki w ostatnich 30 dniach vs poprzednie 30 dni</value>
+  </data>
+
+	<data name="TicketsInProgress" xml:space="preserve">
+    <value>W toku</value>
+  </data>
+	<data name="TicketsInProgressHint" xml:space="preserve">
+    <value>Aktualnie obsługiwane</value>
+  </data>
+	<data name="TrendTicketsInProgressTooltip" xml:space="preserve">
+    <value>Przeniesione do statusu W toku w ostatnich 30 dniach vs poprzednie 30 dni</value>
+  </data>
+
+	<data name="TicketsWaiting" xml:space="preserve">
+    <value>Oczekujące</value>
+  </data>
+	<data name="TicketsWaitingHint" xml:space="preserve">
+    <value>Wstrzymane lub oczekuje na informację</value>
+  </data>
+	<data name="TrendTicketsWaitingTooltip" xml:space="preserve">
+    <value>Przeniesione do statusu Oczekujące w ostatnich 30 dniach vs poprzednie 30 dni</value>
+  </data>
+
+	<data name="TopOldestActiveTicketsTitle" xml:space="preserve">
+    <value>Najstarsze aktywne zgłoszenia</value>
+  </data>
+	<data name="TopStaleActiveTicketsTitle" xml:space="preserve">
+    <value>Najdłużej bez aktualizacji (aktywne)</value>
+  </data>
+	<data name="TopOldestWaitingTicketsTitle" xml:space="preserve">
+    <value>Najstarsze oczekujące zgłoszenia</value>
+  </data>
+	<data name="TopStaleWaitingTicketsTitle" xml:space="preserve">
+    <value>Najdłużej bez aktualizacji (oczekujące)</value>
+  </data>
+
+	<!-- Licenses -->
+	<data name="Licenses" xml:space="preserve">
+    <value>Licencje</value>
+  </data>
+	<data name="TopExpiringLicensesTitle" xml:space="preserve">
+    <value>Najbliżej końca subskrypcji</value>
+  </data>
+	<data name="TopUnusedLicensesTitle" xml:space="preserve">
+    <value>Niewykorzystane licencje</value>
+  </data>
+
+	<data name="Expired" xml:space="preserve">
+    <value>Wygasła</value>
+  </data>
+	<data name="EndsToday" xml:space="preserve">
+    <value>Kończy się dziś</value>
+  </data>
+	<data name="DaysLeftFormat" xml:space="preserve">
+    <value>Pozostało {0} dni</value>
+  </data>
+
+	<!-- Assets -->
+	<data name="Assets" xml:space="preserve">
+    <value>Sprzęt</value>
+  </data>
+	<data name="Devices" xml:space="preserve">
+    <value>Urządzenia</value>
+  </data>
+	<data name="DevicesHint" xml:space="preserve">
+    <value>Łączna liczba urządzeń</value>
+  </data>
+	<data name="DeviceTypeStructureTitle" xml:space="preserve">
+    <value>Struktura typów urządzeń</value>
+  </data>
+	<data name="DeviceTypeStructureSourceHint" xml:space="preserve">
+    <value>Źródło: devices</value>
+  </data>
+
+	<!-- Backups -->
+	<data name="Backups" xml:space="preserve">
+    <value>Kopie zapasowe</value>
+  </data>
+
+	<data name="BackupOK" xml:space="preserve">
+    <value>Backup OK</value>
+  </data>
+	<data name="BackupOkHint" xml:space="preserve">
+    <value>Poprawny stan</value>
+  </data>
+
+	<data name="BackupWarning" xml:space="preserve">
+    <value>Backup ostrzeżenie</value>
+  </data>
+	<data name="BackupWarningHint" xml:space="preserve">
+    <value>Wymaga uwagi</value>
+  </data>
+
+	<data name="BackupFailed" xml:space="preserve">
+    <value>Backup błąd</value>
+  </data>
+	<data name="BackupFailedHint" xml:space="preserve">
+    <value>Awaria</value>
+  </data>
+
+	<data name="BackupDisabled" xml:space="preserve">
+    <value>Backup wyłączony</value>
+  </data>
+	<data name="BackupDisabledHint" xml:space="preserve">
+    <value>Wyłączony</value>
+  </data>
+
+	<data name="TopBackupIssuesTitle" xml:space="preserve">
+    <value>Najważniejsze problemy backupu</value>
+  </data>
+	<data name="BackupSourceHint" xml:space="preserve">
+    <value>Źródło: vw_backup_health</value>
+  </data>
+
+	<!-- Printers -->
+	<data name="Printers" xml:space="preserve">
+    <value>Drukarki</value>
+  </data>
+	<data name="RangeDaysFormat" xml:space="preserve">
+    <value>Ostatnie {0} dni</value>
+  </data>
+
+	<data name="PrinterPagesTitleFormat" xml:space="preserve">
+    <value>Strony ({0} dni)</value>
+  </data>
+	<data name="PrinterColorTitleFormat" xml:space="preserve">
+    <value>Kolor ({0} dni)</value>
+  </data>
+	<data name="PrinterMonoTitleFormat" xml:space="preserve">
+    <value>Mono ({0} dni)</value>
+  </data>
+	<data name="PrinterCostTitleFormat" xml:space="preserve">
+    <value>Koszt ({0} dni)</value>
+  </data>
+	<data name="TopPrintersTitleFormat" xml:space="preserve">
+    <value>Top drukarki ({0} dni)</value>
+  </data>
+	<data name="TrendPrintersVsPrevious" xml:space="preserve">
+    <value>Porównanie do poprzedniego zakresu</value>
+  </data>
+
+	<!-- Tables -->
+	<data name="TableId" xml:space="preserve">
+    <value>ID</value>
+  </data>
+	<data name="TableTitle" xml:space="preserve">
+    <value>Tytuł</value>
+  </data>
+	<data name="TableStatus" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="TablePriority" xml:space="preserve">
+    <value>Priorytet</value>
+  </data>
+	<data name="TableAge" xml:space="preserve">
+    <value>Wiek</value>
+  </data>
+	<data name="TableLastActionAge" xml:space="preserve">
+    <value>Czas od ostatniej akcji</value>
+  </data>
+
+	<data name="TableLicense" xml:space="preserve">
+    <value>Licencja</value>
+  </data>
+	<data name="TableType" xml:space="preserve">
+    <value>Typ</value>
+  </data>
+	<data name="TableProducer" xml:space="preserve">
+    <value>Producent</value>
+  </data>
+	<data name="TableUser" xml:space="preserve">
+    <value>Użytkownik</value>
+  </data>
+	<data name="TableDaysLeft" xml:space="preserve">
+    <value>Pozostało dni</value>
+  </data>
+	<data name="TableInventoryNo" xml:space="preserve">
+    <value>Nr inw.</value>
+  </data>
+	<data name="TableSubscription" xml:space="preserve">
+    <value>Subskrypcja</value>
+  </data>
+
+	<data name="TableCountShort" xml:space="preserve">
+    <value>Ilość</value>
+  </data>
+	<data name="TableShare" xml:space="preserve">
+    <value>Udział</value>
+  </data>
+
+	<data name="TableSystem" xml:space="preserve">
+    <value>System</value>
+  </data>
+	<data name="TableFrequency" xml:space="preserve">
+    <value>Częstotliwość</value>
+  </data>
+	<data name="TableLastStatus" xml:space="preserve">
+    <value>Ostatni status</value>
+  </data>
+	<data name="TableLastBackup" xml:space="preserve">
+    <value>Ostatni backup</value>
+  </data>
+	<data name="TableState" xml:space="preserve">
+    <value>Stan</value>
+  </data>
+
+	<data name="TableHostname" xml:space="preserve">
+    <value>Hostname</value>
+  </data>
+	<data name="TableModel" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="TableLocation" xml:space="preserve">
+    <value>Lokalizacja</value>
+  </data>
+	<data name="TablePages" xml:space="preserve">
+    <value>Strony</value>
+  </data>
+	<data name="TableColor" xml:space="preserve">
+    <value>Kolor</value>
+  </data>
+	<data name="TableMono" xml:space="preserve">
+    <value>Mono</value>
+  </data>
+	<data name="TableCost" xml:space="preserve">
+    <value>Koszt</value>
+  </data>
+
+</root>

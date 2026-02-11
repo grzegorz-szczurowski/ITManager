@@ -1,0 +1,171 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="DialogTitle" xml:space="preserve">
+    <value>New ticket</value>
+  </data>
+	<data name="DialogSubtitle" xml:space="preserve">
+    <value>Describe the issue and select Urgency and Impact. The system will calculate the priority automatically.</value>
+  </data>
+
+	<data name="SecurityBoxTitle" xml:space="preserve">
+    <value>Notice:</value>
+  </data>
+	<data name="SecurityBoxText" xml:space="preserve">
+    <value>please do not include any sensitive or authentication data (for example passwords, PINs, MFA codes, card numbers).</value>
+  </data>
+
+	<data name="NoCreatePermission" xml:space="preserve">
+    <value>You do not have permission to create tickets.</value>
+  </data>
+	<data name="CloseButton" xml:space="preserve">
+    <value>Close</value>
+  </data>
+
+	<data name="DetailsSectionTitle" xml:space="preserve">
+    <value>Details</value>
+  </data>
+	<data name="TitleLabel" xml:space="preserve">
+    <value>Title</value>
+  </data>
+	<data name="DescriptionLabel" xml:space="preserve">
+    <value>Description</value>
+  </data>
+	<data name="TitleTooShort" xml:space="preserve">
+    <value>The title must be at least 10 characters long.</value>
+  </data>
+	<data name="DescriptionTooShort" xml:space="preserve">
+    <value>The description must be at least 10 characters long.</value>
+  </data>
+
+	<data name="UrgencyTitle" xml:space="preserve">
+    <value>Urgency</value>
+  </data>
+	<data name="UrgencyHelp" xml:space="preserve">
+    <value>How quickly the issue needs attention</value>
+  </data>
+	<data name="SelectUrgencyHint" xml:space="preserve">
+    <value>Select urgency level</value>
+  </data>
+	<data name="UrgencyRequired" xml:space="preserve">
+    <value>Urgency is required.</value>
+  </data>
+
+	<data name="ImpactTitle" xml:space="preserve">
+    <value>Impact</value>
+  </data>
+	<data name="ImpactHelp" xml:space="preserve">
+    <value>How much this affects work or services</value>
+  </data>
+	<data name="SelectImpactHint" xml:space="preserve">
+    <value>Select impact level</value>
+  </data>
+	<data name="ImpactRequired" xml:space="preserve">
+    <value>Impact is required.</value>
+  </data>
+
+	<data name="PriorityTitle" xml:space="preserve">
+    <value>Priority</value>
+  </data>
+	<data name="PriorityHelp" xml:space="preserve">
+    <value>Calculated from Urgency and Impact</value>
+  </data>
+
+	<data name="PriorityNone" xml:space="preserve">
+    <value>Select Urgency and Impact</value>
+  </data>
+	<data name="PriorityP1" xml:space="preserve">
+    <value>Critical</value>
+  </data>
+	<data name="PriorityP2" xml:space="preserve">
+    <value>Very high</value>
+  </data>
+	<data name="PriorityP3" xml:space="preserve">
+    <value>High</value>
+  </data>
+	<data name="PriorityP4" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+	<data name="PriorityP5" xml:space="preserve">
+    <value>Low</value>
+  </data>
+
+	<data name="SubmitButton" xml:space="preserve">
+    <value>Submit</value>
+  </data>
+	<data name="CancelButton" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+
+	<data name="FormInvalidWarning" xml:space="preserve">
+    <value>Please fill in required fields and fix validation errors.</value>
+  </data>
+
+	<data name="TicketCreatedSuccess" xml:space="preserve">
+    <value>Ticket #{0} has been created.</value>
+  </data>
+	<data name="SaveError" xml:space="preserve">
+    <value>Could not save the ticket. {0}</value>
+  </data>
+
+	<data name="CriticalManagersOnlyTooltip" xml:space="preserve">
+    <value>The Critical level is available only for managers. Use it only when escalation is required.</value>
+  </data>
+
+	<data name="Level_Low" xml:space="preserve">
+    <value>Low</value>
+  </data>
+	<data name="Level_Medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+	<data name="Level_High" xml:space="preserve">
+    <value>High</value>
+  </data>
+	<data name="Level_Critical" xml:space="preserve">
+    <value>Critical</value>
+  </data>
+	<data name="Level_Info" xml:space="preserve">
+    <value>Info</value>
+  </data>
+
+	<data name="UrgencyDescLow" xml:space="preserve">
+    <value>Low time pressure. The issue can wait.</value>
+  </data>
+	<data name="UrgencyDescMedium" xml:space="preserve">
+    <value>Standard response time is acceptable.</value>
+  </data>
+	<data name="UrgencyDescHigh" xml:space="preserve">
+    <value>Quick response needed. Work is impacted.</value>
+  </data>
+	<data name="UrgencyDescCritical" xml:space="preserve">
+    <value>Immediate. Work is heavily blocked or a serious incident occurred.</value>
+  </data>
+
+	<data name="ImpactDescInfo" xml:space="preserve">
+    <value>A question or request with no real impact on work.</value>
+  </data>
+	<data name="ImpactDescLow" xml:space="preserve">
+    <value>Minor impact. Affects a single person or a small function.</value>
+  </data>
+	<data name="ImpactDescMedium" xml:space="preserve">
+    <value>Medium impact. Affects several people or an important function.</value>
+  </data>
+	<data name="ImpactDescHigh" xml:space="preserve">
+    <value>High impact. Affects a team or a key process.</value>
+  </data>
+	<data name="ImpactDescCritical" xml:space="preserve">
+    <value>Critical impact. Affects production or many areas at once.</value>
+  </data>
+</root>

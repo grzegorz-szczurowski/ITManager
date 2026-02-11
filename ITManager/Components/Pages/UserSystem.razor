@@ -1,0 +1,251 @@
+﻿@page "/user/system"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "Perm:Settings.View")]
+
+@* File: Components/Pages/SystemSettings.razor
+   Description: System settings. Left column shows sections, right panel shows selected settings.
+                Global Save saves all dirty sections (now and future).
+   Version: 1.22
+   Created: 2026-01-24
+   Updated: 2026-01-27 - Security: page-level Authorize (Perm:Settings.View) + RBAC gate aligned to Settings.View.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject IStringLocalizer<UserSystem> L
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+@inject UserPreferencesService UserPreferencesService
+@inject TimeZoneService TimeZoneService
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Start" Justify="Justify.SpaceBetween" Spacing="2">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Subtitle"]</MudText>
+            </MudStack>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Disabled="@(!_loaded || !_canManage || !_hasAnyChanges || _savingAll)"
+                       OnClick="SaveAllAsync">
+                @L["Save"]
+            </MudButton>
+        </MudStack>
+
+        @if (!_loaded)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (!_canManage)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">
+                @L["NoPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid GutterSize="GutterSize.Small" Class="mt-2">
+                <MudItem xs="12" md="3">
+                    <MudPaper Class="pa-4" Elevation="0">
+                        <MudList T="SectionRow" Dense="true">
+                            @foreach (var s in _sections)
+                            {
+                                <MudListItem T="SectionRow"
+                                             @key="s.Key"
+                                             Text="@s.Title"
+                                             Selected="@(s.Key == _activeSection)"
+                                             OnClick="@(() => SelectSection(s.Key))">
+                                </MudListItem>
+                            }
+                        </MudList>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="9">
+                    @if (_activeSection == SectionKey.TimeZone)
+                    {
+                        <MudPaper Class="pa-4" Elevation="0">
+                            <MudText Typo="Typo.subtitle1" Class="mb-2">@L["TimeZone_Title"]</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["TimeZone_Desc"]</MudText>
+
+                            <MudSelect T="string"
+                                       Label="@L["TimeZone_SelectLabel"]"
+                                       Variant="Variant.Outlined"
+                                       Dense="true"
+                                       Class="mt-2"
+                                       Value="@_selectedTimeZoneId"
+                                       ValueChanged="OnTimeZoneChanged"
+                                       Disabled="@_savingAll">
+                                @foreach (var tz in _timeZones)
+                                {
+                                    <MudSelectItem Value="@tz.Id">@tz.DisplayName</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudPaper Class="pa-4" Elevation="0">
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["SelectSectionHint"]</MudText>
+                        </MudPaper>
+                    }
+                </MudItem>
+            </MudGrid>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+@code
+{
+    private const string PermSettingsManage = "Settings.View";
+
+    private enum SectionKey
+    {
+        TimeZone = 1
+    }
+
+    private sealed record SectionRow(SectionKey Key, string Title);
+
+    private sealed record SectionRegistration(SectionKey Key, Func<bool> IsDirty, Func<Task> SaveAsync);
+
+    private bool _loaded;
+    private bool _canManage;
+
+    private List<SectionRow> _sections = new();
+    private SectionKey _activeSection = SectionKey.TimeZone;
+
+    private readonly List<SectionRegistration> _registrations = new();
+
+    private bool _hasAnyChanges;
+    private bool _savingAll;
+
+    private List<TimeZoneInfo> _timeZones = new();
+    private string? _currentTimeZoneId;
+    private string? _selectedTimeZoneId;
+    private bool _timeZoneDirty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            _canManage = await CurrentUserContextService.CanAsync(PermSettingsManage);
+
+            _sections = new List<SectionRow>
+            {
+                new(SectionKey.TimeZone, L["Section_TimeZone"])
+            };
+
+            _timeZones = TimeZoneInfo.GetSystemTimeZones()
+                .OrderBy(t => t.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            _currentTimeZoneId = await UserPreferencesService.GetPreferredTimeZoneIdAsync();
+
+            if (string.IsNullOrWhiteSpace(_currentTimeZoneId))
+                _currentTimeZoneId = TimeZoneInfo.Local.Id;
+
+            if (!_timeZones.Any(t => string.Equals(t.Id, _currentTimeZoneId, StringComparison.OrdinalIgnoreCase)))
+                _currentTimeZoneId = TimeZoneInfo.Local.Id;
+
+            _selectedTimeZoneId = _currentTimeZoneId;
+            _timeZoneDirty = false;
+
+            _registrations.Clear();
+
+            RegisterSection(
+                SectionKey.TimeZone,
+                () => _timeZoneDirty,
+                SaveTimeZoneAsync
+            );
+
+            RecomputeDirty();
+        }
+        finally
+        {
+            _loaded = true;
+        }
+    }
+
+    private void RegisterSection(SectionKey key, Func<bool> isDirty, Func<Task> saveAsync)
+    {
+        if (_registrations.Any(r => r.Key == key))
+            return;
+
+        _registrations.Add(new SectionRegistration(key, isDirty, saveAsync));
+    }
+
+    private void SelectSection(SectionKey key) => _activeSection = key;
+
+    private Task OnTimeZoneChanged(string value)
+    {
+        _selectedTimeZoneId = value;
+        _timeZoneDirty = !string.Equals(_selectedTimeZoneId, _currentTimeZoneId, StringComparison.Ordinal);
+        RecomputeDirty();
+        return Task.CompletedTask;
+    }
+
+    private void RecomputeDirty()
+    {
+        _hasAnyChanges = _registrations.Any(r => r.IsDirty());
+        StateHasChanged();
+    }
+
+    private async Task SaveAllAsync()
+    {
+        if (!_canManage) return;
+        if (_savingAll) return;
+
+        var toSave = _registrations.Where(r => r.IsDirty()).ToList();
+        if (toSave.Count == 0) return;
+
+        _savingAll = true;
+        try
+        {
+            foreach (var r in toSave)
+                await r.SaveAsync();
+
+            RecomputeDirty();
+            Snackbar.Add(L["Saved"], Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"{L["SaveError"]}: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _savingAll = false;
+        }
+    }
+
+    private async Task SaveTimeZoneAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedTimeZoneId))
+            return;
+
+        if (!_timeZoneDirty)
+            return;
+
+        await UserPreferencesService.SetPreferredTimeZoneIdAsync(_selectedTimeZoneId);
+
+        _currentTimeZoneId = _selectedTimeZoneId;
+        _timeZoneDirty = false;
+
+        TimeZoneService.InvalidateCache();
+    }
+}

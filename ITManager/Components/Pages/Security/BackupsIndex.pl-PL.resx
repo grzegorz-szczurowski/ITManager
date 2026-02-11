@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve"><value>Centrum bezpieczeństwa - kopie zapasowe</value></data>
+	<data name="Subtitle" xml:space="preserve"><value>Statusy ostatnich uruchomień kopii zapasowych</value></data>
+
+	<data name="Refresh" xml:space="preserve"><value>Odśwież</value></data>
+	<data name="From" xml:space="preserve"><value>Od</value></data>
+	<data name="To" xml:space="preserve"><value>Do</value></data>
+	<data name="Status" xml:space="preserve"><value>Status</value></data>
+	<data name="JobSearch" xml:space="preserve"><value>Szukaj po nazwie zadania</value></data>
+	<data name="ApplyFilters" xml:space="preserve"><value>Zastosuj filtry</value></data>
+	<data name="Clear" xml:space="preserve"><value>Wyczyść</value></data>
+
+	<data name="Started" xml:space="preserve"><value>Start</value></data>
+	<data name="Tool" xml:space="preserve"><value>Narzędzie</value></data>
+	<data name="Job" xml:space="preserve"><value>Zadanie</value></data>
+	<data name="Target" xml:space="preserve"><value>Cel</value></data>
+	<data name="Duration" xml:space="preserve"><value>Czas</value></data>
+	<data name="Message" xml:space="preserve"><value>Komunikat</value></data>
+
+	<data name="Status.Success" xml:space="preserve"><value>Sukces</value></data>
+	<data name="Status.Warning" xml:space="preserve"><value>Ostrzeżenie</value></data>
+	<data name="Status.Failed" xml:space="preserve"><value>Błąd</value></data>
+	<data name="Status.Running" xml:space="preserve"><value>W trakcie</value></data>
+	<data name="Status.Unknown" xml:space="preserve"><value>Nieznany</value></data>
+
+	<data name="NoPermissions" xml:space="preserve"><value>Brak uprawnień</value></data>
+	<data name="LoadError" xml:space="preserve"><value>Nie udało się załadować danych</value></data>
+</root>

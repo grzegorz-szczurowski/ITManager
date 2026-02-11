@@ -1,0 +1,992 @@
+﻿@page "/assets/systems"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Assets.Systems.View")]
+
+@* File: Components/Pages/Assets/SystemsIndex.razor
+   Description: Lista systemów (IT Resources) w oparciu o MudDataGrid, spójna wizualnie z Tickets/Devices/Licenses/SIM.
+                Search zawsze widoczny + Advanced filters (collapse) jak w Devices.
+                Filtry dopasowane do Systems: Type, Scope, Criticality, Hosting type, Status, Data owner, Primary admin.
+   Created: 2025-12-16
+   Updated: 2026-01-23 - wersja 1.21:
+     - Grid: standard szerokości kolumn jak UsersIndex: procenty + table-layout fixed + ellipsis (dopasowanie do obszaru)
+   Updated: 2026-01-24 - wersja 1.22:
+     - TimeZone: nazwa pliku eksportu liczona wg strefy czasowej użytkownika (TimeZoneService)
+   Updated: 2026-01-25 - wersja 1.23:
+     - Security: page-level policy Authorize (Perm:Assets.Systems.View)
+     - Logging: ILogger zamiast Console.Error
+     - FIX: uproszczony timeout (bez StartLoadWatchdog) aby uniknąć race condition
+     - UX: Hover zawsze true, klikowalność kontrolowana klasą i RBAC
+   Updated: 2026-02-08 - wersja 1.24:
+     - Navigation: zamiast SystemEditDialog otwieramy stronę SystemEdit:
+         /assets/systems/create
+         /assets/systems/edit/{id}?returnUrl=...
+     - Usunięte: DialogService.Show<SystemEditDialog>() i using ITManager.Components.Dialogs
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@implements IAsyncDisposable
+
+@inject IStringLocalizer<SystemsIndex> L
+@inject SystemsService SystemsService
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject TimeZoneService TimeZoneService
+@inject ILogger<SystemsIndex> Logger
+@inject NavigationManager Nav
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewSystems)" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+
+                <MudTextField T="string"
+                              Value="@_searchText"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="@L["SearchPlaceholder"]"
+                              Immediate="true"
+                              Disabled="@(_isLoading || _isExporting || !_canViewSystems)"
+                              Class="system-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 system-clear-btn"
+                           OnClick="ClearFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewSystems)">
+                    @L["ClearFilters"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           OnClick="ToggleAdvancedFilters"
+                           Disabled="@(_isLoading || _isExporting || !_canViewSystems)">
+                    @L["AdvancedFilters"]
+                </MudButton>
+
+            </MudStack>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canViewSystems)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoViewPermission"]
+            </MudAlert>
+        }
+        else
+        {
+            <div class="systems-content-container">
+
+                @if (!string.IsNullOrWhiteSpace(_loadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled">
+                        @_loadError
+                    </MudAlert>
+                }
+
+                <MudCollapse Expanded="@_showAdvancedFilters">
+                    <MudPaper Class="pa-3 mt-2 systems-filters-panel" Elevation="0">
+                        <MudGrid Spacing="2">
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Type"]"
+                                           Value="@_selectedType"
+                                           ValueChanged="OnTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsTypes)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Scope"]"
+                                           Value="@_selectedScope"
+                                           ValueChanged="OnScopeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsScopes)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Criticality"]"
+                                           Value="@_selectedCriticality"
+                                           ValueChanged="OnCriticalityChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsCriticalities)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.HostingType"]"
+                                           Value="@_selectedHostingType"
+                                           ValueChanged="OnHostingTypeChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsHostingTypes)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.Status"]"
+                                           Value="@_selectedStatus"
+                                           ValueChanged="OnStatusChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsStatuses)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.DataOwner"]"
+                                           Value="@_selectedDataOwner"
+                                           ValueChanged="OnDataOwnerChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Clearable="true"
+                                           Strict="false"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsDataOwners)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            <MudItem xs="12" sm="6" md="4" lg="3">
+                                <MudSelect T="string"
+                                           Label="@L["Col.PrimaryAdministrator"]"
+                                           Value="@_selectedPrimaryAdmin"
+                                           ValueChanged="OnPrimaryAdminChangedAsync"
+                                           Dense="true"
+                                           DisableUnderline="true"
+                                           Searchable="true"
+                                           Clearable="true"
+                                           Strict="false"
+                                           Disabled="@(_isLoading || _isExporting)">
+                                    <MudSelectItem Value="@AllValue">@L["All"]</MudSelectItem>
+                                    @foreach (var v in _lookupsPrimaryAdmins)
+                                    {
+                                        <MudSelectItem Value="@v">@v</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                        </MudGrid>
+                    </MudPaper>
+                </MudCollapse>
+
+                <MudStack Row="true"
+                          Justify="Justify.FlexStart"
+                          AlignItems="AlignItems.Center"
+                          Class="mt-3 mb-2">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddSystemAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canCreateSystems)">
+                        @L["AddSystems"]
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.FileDownload"
+                               Class="ml-2"
+                               OnClick="ExportVisibleToExcelAsync"
+                               Disabled="@(_isLoading || _isExporting || !_canViewSystems || (_filteredRows?.Count ?? 0) == 0)">
+                        @Txt("ExportExcel", "Export Excel")
+                    </MudButton>
+                </MudStack>
+
+                <MudDataGrid T="SystemListRow"
+                             @ref="_grid"
+                             Class="systems-grid"
+                             Items="@_filteredRows"
+                             Hover="true"
+                             Dense="true"
+                             Bordered="false"
+                             Elevation="0"
+                             Breakpoint="Breakpoint.Sm"
+                             HorizontalScrollbar="false"
+                             RowClassFunc="GetRowClass"
+                             RowClick="OnRowClickedAsync"
+                             @bind-RowsPerPage="_rowsPerPage">
+
+                    <PagerContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                            <MudDataGridPager T="SystemListRow" PageSizeOptions="@_rowsPerPageOptions" />
+                        </MudStack>
+                    </PagerContent>
+
+                    <Columns>
+
+                        @* Standard: procenty + table-layout fixed (dopasowanie do obszaru) *@
+                        @* SUMA = 100% *@
+
+                        <PropertyColumn Property="x => x.SystemName"
+                                        Title="@L["Col.SystemName"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:22%;"
+                                        CellStyle="width:22%;" />
+
+                        <PropertyColumn Property="x => x.Type"
+                                        Title="@L["Col.Type"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;" />
+
+                        <PropertyColumn Property="x => x.Scope"
+                                        Title="@L["Col.Scope"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="x => x.Criticality"
+                                        Title="@L["Col.Criticality"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:10%;"
+                                        CellStyle="width:10%;" />
+
+                        <PropertyColumn Property="x => x.DataOwner"
+                                        Title="@L["Col.DataOwner"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:14%;"
+                                        CellStyle="width:14%;" />
+
+                        <PropertyColumn Property="x => x.PrimaryAdministrator"
+                                        Title="@L["Col.PrimaryAdministrator"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.SecondaryAdministrator"
+                                        Title="@L["Col.SecondaryAdministrator"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:12%;"
+                                        CellStyle="width:12%;" />
+
+                        <PropertyColumn Property="x => x.HostingType"
+                                        Title="@L["Col.HostingType"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:8%;"
+                                        CellStyle="width:8%;" />
+
+                        <PropertyColumn Property="x => x.Status"
+                                        Title="@L["Col.Status"]"
+                                        Sortable="true"
+                                        HeaderStyle="width:4%;"
+                                        CellStyle="width:4%;" />
+
+                    </Columns>
+
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="px-2 py-2">
+                            @L["NoRecords"]
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudDataGrid>
+
+                <MudOverlay Visible="@(_isLoading || _isExporting)"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="systems-overlay">
+                    <MudPaper Class="pa-6 systems-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">
+                                @(_isExporting? Txt("Overlay_Exporting", "Eksportuję dane...") : L["LoadingData"])
+                            </MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .system-row {
+        min-height: 44px;
+    }
+
+        .system-row td,
+        .system-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .system-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .system-row-clickable {
+        cursor: pointer;
+    }
+
+    .system-search {
+        min-width: 400px;
+    }
+
+    .systems-filters-panel {
+        border-radius: 8px;
+    }
+
+    .system-clear-btn {
+        border-width: 1px;
+    }
+
+    .systems-content-container {
+        position: relative;
+        min-height: 220px;
+    }
+
+    .systems-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .systems-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    /* Standard szerokości jak UsersIndex: fixed layout + ellipsis */
+    .systems-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .systems-grid th,
+    .systems-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private const string AllValue = "__all";
+    private static readonly TimeSpan DataLoadTimeout = TimeSpan.FromSeconds(30);
+
+    private bool _ready;
+    private bool _isLoading = true;
+    private bool _isExporting;
+
+    private bool _canViewSystems;
+    private bool _canEditSystems;
+    private bool _canCreateSystems;
+    private bool _canDeleteSystems;
+
+    private string _searchText = string.Empty;
+    private string _loadError = string.Empty;
+
+    private bool _showAdvancedFilters;
+
+    private List<SystemListRow> _allRows = new();
+    private List<SystemListRow> _filteredRows = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 100, 200, 500, 1000, 2000 };
+
+    private string _selectedType = AllValue;
+    private string _selectedScope = AllValue;
+    private string _selectedCriticality = AllValue;
+    private string _selectedHostingType = AllValue;
+    private string _selectedStatus = AllValue;
+    private string _selectedDataOwner = AllValue;
+    private string _selectedPrimaryAdmin = AllValue;
+
+    private List<string> _lookupsTypes = new();
+    private List<string> _lookupsScopes = new();
+    private List<string> _lookupsCriticalities = new();
+    private List<string> _lookupsHostingTypes = new();
+    private List<string> _lookupsStatuses = new();
+    private List<string> _lookupsDataOwners = new();
+    private List<string> _lookupsPrimaryAdmins = new();
+
+    private MudDataGrid<SystemListRow>? _grid;
+    private IJSObjectReference? _downloadModule;
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        _canViewSystems = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Assets.Systems.View");
+        _canEditSystems = _canViewSystems && ctx.Has("Assets.Systems.Edit");
+        _canCreateSystems = _canViewSystems && ctx.Has("Assets.Systems.Create");
+        _canDeleteSystems = _canViewSystems && ctx.Has("Assets.Systems.Delete");
+
+        _ready = true;
+
+        if (!_canViewSystems)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+        }
+        catch
+        {
+            _userTz = TimeZoneInfo.Local;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private Task AddSystemAsync()
+    {
+        if (_isLoading || _isExporting)
+            return Task.CompletedTask;
+
+        if (!_canCreateSystems)
+        {
+            Snackbar.Add(L["NoCreatePermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigateToSystemEdit(systemId: 0);
+        return Task.CompletedTask;
+    }
+
+    private Task OnRowClickedAsync(DataGridRowClickEventArgs<SystemListRow> args)
+    {
+        if (_isLoading || _isExporting)
+            return Task.CompletedTask;
+
+        var id = args?.Item?.Id ?? 0;
+        if (id <= 0)
+            return Task.CompletedTask;
+
+        if (!_canEditSystems)
+        {
+            Snackbar.Add(L["NoEditPermission"], Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        NavigateToSystemEdit(systemId: id);
+        return Task.CompletedTask;
+    }
+
+    private void NavigateToSystemEdit(int systemId)
+    {
+        var returnUrl = Uri.EscapeDataString("/assets/systems");
+
+        if (systemId <= 0)
+        {
+            Nav.NavigateTo($"/assets/systems/create?returnUrl={returnUrl}");
+            return;
+        }
+
+        Nav.NavigateTo($"/assets/systems/edit/{systemId}?returnUrl={returnUrl}");
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_isExporting)
+            return;
+
+        _isLoading = true;
+        _loadError = string.Empty;
+
+        try
+        {
+            var loadTask = SystemsService.GetSystemsAsync();
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(DataLoadTimeout));
+
+            if (completedTask != loadTask)
+            {
+                _allRows = new List<SystemListRow>();
+                _filteredRows = new List<SystemListRow>();
+                _loadError = string.Format(L["TimeoutError"], (int)DataLoadTimeout.TotalSeconds);
+                Snackbar.Add(L["TimeoutSnackbar"], Severity.Error);
+                return;
+            }
+
+            var result = await loadTask;
+
+            if (!result.Ok)
+            {
+                _allRows = new List<SystemListRow>();
+                _filteredRows = new List<SystemListRow>();
+                _loadError = result.ErrorMessage;
+                Snackbar.Add(L["LoadFailedSnackbar"], Severity.Error);
+                return;
+            }
+
+            _allRows = result.Rows ?? new List<SystemListRow>();
+
+            BuildLookupsFromRows();
+            NormalizeFiltersAgainstLookups();
+            RebuildFilteredRows();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoViewPermission"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Systems] Load error.");
+            Snackbar.Add(L["LoadFailedTryLater"], Severity.Error);
+
+            _allRows = new List<SystemListRow>();
+            _filteredRows = new List<SystemListRow>();
+            _loadError = L["GenericLoadError"];
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void BuildLookupsFromRows()
+    {
+        var rows = _allRows ?? new List<SystemListRow>();
+
+        _lookupsTypes = rows.Select(x => (x.Type ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsScopes = rows.Select(x => (x.Scope ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsCriticalities = rows.Select(x => (x.Criticality ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsHostingTypes = rows.Select(x => (x.HostingType ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsStatuses = rows.Select(x => (x.Status ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsDataOwners = rows.Select(x => (x.DataOwner ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _lookupsPrimaryAdmins = rows.Select(x => (x.PrimaryAdministrator ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private void NormalizeFiltersAgainstLookups()
+    {
+        if (_selectedType != AllValue && !_lookupsTypes.Contains(_selectedType, StringComparer.OrdinalIgnoreCase))
+            _selectedType = AllValue;
+
+        if (_selectedScope != AllValue && !_lookupsScopes.Contains(_selectedScope, StringComparer.OrdinalIgnoreCase))
+            _selectedScope = AllValue;
+
+        if (_selectedCriticality != AllValue && !_lookupsCriticalities.Contains(_selectedCriticality, StringComparer.OrdinalIgnoreCase))
+            _selectedCriticality = AllValue;
+
+        if (_selectedHostingType != AllValue && !_lookupsHostingTypes.Contains(_selectedHostingType, StringComparer.OrdinalIgnoreCase))
+            _selectedHostingType = AllValue;
+
+        if (_selectedStatus != AllValue && !_lookupsStatuses.Contains(_selectedStatus, StringComparer.OrdinalIgnoreCase))
+            _selectedStatus = AllValue;
+
+        if (_selectedDataOwner != AllValue && !_lookupsDataOwners.Contains(_selectedDataOwner, StringComparer.OrdinalIgnoreCase))
+            _selectedDataOwner = AllValue;
+
+        if (_selectedPrimaryAdmin != AllValue && !_lookupsPrimaryAdmins.Contains(_selectedPrimaryAdmin, StringComparer.OrdinalIgnoreCase))
+            _selectedPrimaryAdmin = AllValue;
+    }
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _searchText = value ?? string.Empty;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+
+        _selectedType = AllValue;
+        _selectedScope = AllValue;
+        _selectedCriticality = AllValue;
+        _selectedHostingType = AllValue;
+        _selectedStatus = AllValue;
+        _selectedDataOwner = AllValue;
+        _selectedPrimaryAdmin = AllValue;
+
+        RebuildFilteredRows();
+    }
+
+    private Task OnTypeChangedAsync(string value)
+    {
+        _selectedType = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnScopeChangedAsync(string value)
+    {
+        _selectedScope = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnCriticalityChangedAsync(string value)
+    {
+        _selectedCriticality = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnHostingTypeChangedAsync(string value)
+    {
+        _selectedHostingType = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStatusChangedAsync(string value)
+    {
+        _selectedStatus = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnDataOwnerChangedAsync(string value)
+    {
+        _selectedDataOwner = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private Task OnPrimaryAdminChangedAsync(string value)
+    {
+        _selectedPrimaryAdmin = string.IsNullOrWhiteSpace(value) ? AllValue : value;
+        RebuildFilteredRows();
+        return Task.CompletedTask;
+    }
+
+    private void RebuildFilteredRows()
+        => _filteredRows = BuildFilteredRows();
+
+    private List<SystemListRow> BuildFilteredRows()
+    {
+        IEnumerable<SystemListRow> query = _allRows ?? new List<SystemListRow>();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim();
+
+            query = query.Where(x =>
+                ContainsIgnoreCase(x.SystemName, term) ||
+                ContainsIgnoreCase(x.Type, term) ||
+                ContainsIgnoreCase(x.Scope, term) ||
+                ContainsIgnoreCase(x.Criticality, term) ||
+                ContainsIgnoreCase(x.DataOwner, term) ||
+                ContainsIgnoreCase(x.PrimaryAdministrator, term) ||
+                ContainsIgnoreCase(x.SecondaryAdministrator, term) ||
+                ContainsIgnoreCase(x.HostingType, term) ||
+                ContainsIgnoreCase(x.Status, term)
+            );
+        }
+
+        if (_selectedType != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Type, _selectedType));
+
+        if (_selectedScope != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Scope, _selectedScope));
+
+        if (_selectedCriticality != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Criticality, _selectedCriticality));
+
+        if (_selectedHostingType != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.HostingType, _selectedHostingType));
+
+        if (_selectedStatus != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.Status, _selectedStatus));
+
+        if (_selectedDataOwner != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.DataOwner, _selectedDataOwner));
+
+        if (_selectedPrimaryAdmin != AllValue)
+            query = query.Where(x => EqualsIgnoreCaseTrim(x.PrimaryAdministrator, _selectedPrimaryAdmin));
+
+        return query.ToList();
+    }
+
+    private static bool EqualsIgnoreCaseTrim(string? a, string b)
+        => string.Equals((a ?? string.Empty).Trim(), (b ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? value, string term)
+        => !string.IsNullOrWhiteSpace(value) &&
+           value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private string GetRowClass(SystemListRow row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+
+        return _canEditSystems ? "system-row system-row-clickable" : "system-row";
+    }
+
+    private async Task ExportVisibleToExcelAsync()
+    {
+        if (_isLoading || _isExporting)
+            return;
+
+        if (!_canViewSystems)
+        {
+            Snackbar.Add(Txt("NoViewPermission", "Brak uprawnień do podglądu systemów."), Severity.Warning);
+            return;
+        }
+
+        var exportRows = GetExportRows();
+        if (exportRows.Count == 0)
+        {
+            Snackbar.Add(Txt("Msg_NoRecordsToExport", "Brak danych do eksportu."), Severity.Info);
+            return;
+        }
+
+        _isExporting = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz);
+
+            var fileName = "systems_" + nowLocal.ToString("yyyyMMdd_HHmm") + ".xlsx";
+            var contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var bytes = BuildSystemsXlsx(exportRows);
+
+            var module = await GetDownloadModuleAsync();
+            var base64 = Convert.ToBase64String(bytes);
+
+            await module.InvokeVoidAsync("downloadFileFromBase64", fileName, contentType, base64);
+
+            Snackbar.Add(Txt("Msg_ExportDone", "Eksport zakończony."), Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Systems] Export error.");
+            Snackbar.Add(Txt("Msg_ExportFailed", "Eksport nieudany. Spróbuj ponownie."), Severity.Error);
+        }
+        finally
+        {
+            _isExporting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<SystemListRow> GetExportRows()
+    {
+        try
+        {
+            if (_grid?.FilteredItems != null)
+                return _grid.FilteredItems.Where(x => x != null).ToList();
+        }
+        catch
+        {
+        }
+
+        return (_filteredRows ?? new List<SystemListRow>()).Where(x => x != null).ToList();
+    }
+
+    private byte[] BuildSystemsXlsx(List<SystemListRow> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Systems");
+
+        var hName = Txt("Col.SystemName", "System");
+        var hType = Txt("Col.Type", "Type");
+        var hScope = Txt("Col.Scope", "Scope");
+        var hCrit = Txt("Col.Criticality", "Criticality");
+        var hOwner = Txt("Col.DataOwner", "Data owner");
+        var hPrim = Txt("Col.PrimaryAdministrator", "Primary admin");
+        var hSec = Txt("Col.SecondaryAdministrator", "Secondary admin");
+        var hHost = Txt("Col.HostingType", "Hosting type");
+        var hStatus = Txt("Col.Status", "Status");
+
+        ws.Cell(1, 1).Value = hName;
+        ws.Cell(1, 2).Value = hType;
+        ws.Cell(1, 3).Value = hScope;
+        ws.Cell(1, 4).Value = hCrit;
+        ws.Cell(1, 5).Value = hOwner;
+        ws.Cell(1, 6).Value = hPrim;
+        ws.Cell(1, 7).Value = hSec;
+        ws.Cell(1, 8).Value = hHost;
+        ws.Cell(1, 9).Value = hStatus;
+
+        var r = 2;
+        foreach (var x in rows)
+        {
+            ws.Cell(r, 1).Value = (x.SystemName ?? string.Empty).Trim();
+            ws.Cell(r, 2).Value = (x.Type ?? string.Empty).Trim();
+            ws.Cell(r, 3).Value = (x.Scope ?? string.Empty).Trim();
+            ws.Cell(r, 4).Value = (x.Criticality ?? string.Empty).Trim();
+            ws.Cell(r, 5).Value = (x.DataOwner ?? string.Empty).Trim();
+            ws.Cell(r, 6).Value = (x.PrimaryAdministrator ?? string.Empty).Trim();
+            ws.Cell(r, 7).Value = (x.SecondaryAdministrator ?? string.Empty).Trim();
+            ws.Cell(r, 8).Value = (x.HostingType ?? string.Empty).Trim();
+            ws.Cell(r, 9).Value = (x.Status ?? string.Empty).Trim();
+            r++;
+        }
+
+        var lastRow = Math.Max(2, r - 1);
+        var range = ws.Range(1, 1, lastRow, 9);
+
+        ws.SheetView.FreezeRows(1);
+        range.SetAutoFilter();
+        ws.Row(1).Style.Font.Bold = true;
+
+        ws.Columns(1, 9).AdjustToContents();
+
+        ws.Column(1).Width = Math.Min(ws.Column(1).Width, 45);
+        ws.Column(5).Width = Math.Min(ws.Column(5).Width, 40);
+        ws.Column(6).Width = Math.Min(ws.Column(6).Width, 40);
+        ws.Column(7).Width = Math.Min(ws.Column(7).Width, 40);
+        ws.Column(8).Width = Math.Min(ws.Column(8).Width, 30);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private async Task<IJSObjectReference> GetDownloadModuleAsync()
+    {
+        if (_downloadModule != null)
+            return _downloadModule;
+
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownload.js");
+        return _downloadModule;
+    }
+
+    private string Txt(string key, string fallback)
+    {
+        var s = L[key];
+        return s.ResourceNotFound ? fallback : s.Value;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_downloadModule != null)
+                await _downloadModule.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+}

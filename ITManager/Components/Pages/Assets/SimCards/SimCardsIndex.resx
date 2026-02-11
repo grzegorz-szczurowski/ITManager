@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>SIM Cards</value>
+  </data>
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Search</value>
+  </data>
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Advanced filters</value>
+  </data>
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view this page.</value>
+  </data>
+
+	<data name="Filter_Type" xml:space="preserve">
+    <value>Type</value>
+  </data>
+	<data name="Filter_Operator" xml:space="preserve">
+    <value>Operator</value>
+  </data>
+	<data name="Filter_Plan" xml:space="preserve">
+    <value>Plan</value>
+  </data>
+	<data name="Filter_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Filter_User" xml:space="preserve">
+    <value>User</value>
+  </data>
+	<data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+
+	<data name="AddSim" xml:space="preserve">
+    <value>Add SIM</value>
+  </data>
+
+	<data name="Col_Type" xml:space="preserve">
+    <value>Type</value>
+  </data>
+	<data name="Col_MobileNumber" xml:space="preserve">
+    <value>Mobile number</value>
+  </data>
+	<data name="Col_SimCardNumber" xml:space="preserve">
+    <value>SIM card number</value>
+  </data>
+	<data name="Col_User" xml:space="preserve">
+    <value>User</value>
+  </data>
+	<data name="Col_Operator" xml:space="preserve">
+    <value>Operator</value>
+  </data>
+	<data name="Col_Plan" xml:space="preserve">
+    <value>Plan</value>
+  </data>
+	<data name="Col_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<data name="NoRecords" xml:space="preserve">
+    <value>No records to display.</value>
+  </data>
+
+	<data name="Overlay_Loading" xml:space="preserve">
+    <value>Loading data</value>
+  </data>
+
+	<data name="Msg_NoCreatePermission" xml:space="preserve">
+    <value>You do not have permission to create SIM cards.</value>
+  </data>
+	<data name="Msg_NoEditPermission" xml:space="preserve">
+    <value>You do not have permission to edit SIM cards.</value>
+  </data>
+
+	<data name="Dialog_NewTitle" xml:space="preserve">
+    <value>New SIM card</value>
+  </data>
+	<data name="Dialog_EditTitle" xml:space="preserve">
+    <value>Edit SIM card</value>
+  </data>
+
+	<data name="Msg_Timeout" xml:space="preserve">
+    <value>Loading data timed out after {0} seconds.</value>
+  </data>
+	<data name="Msg_TimeoutSnackbar" xml:space="preserve">
+    <value>Loading timed out.</value>
+  </data>
+
+	<data name="Msg_LoadFailedSnackbar" xml:space="preserve">
+    <value>Failed to load data.</value>
+  </data>
+	<data name="Msg_LoadFailedTryLater" xml:space="preserve">
+    <value>Failed to load data. Please try again later.</value>
+  </data>
+	<data name="Msg_GenericLoadError" xml:space="preserve">
+    <value>An error occurred while loading data.</value>
+  </data>
+</root>

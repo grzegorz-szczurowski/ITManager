@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve"><value>Urządzenia</value></data>
+	<data name="SearchPlaceholder" xml:space="preserve"><value>Szukaj w urządzeniach</value></data>
+	<data name="ClearFilters" xml:space="preserve"><value>Wyczyść filtry</value></data>
+	<data name="AdvancedFilters" xml:space="preserve"><value>Filtry zaawansowane</value></data>
+	<data name="NoViewPermission" xml:space="preserve"><value>Brak uprawnień do podglądu listy urządzeń.</value></data>
+
+	<data name="All" xml:space="preserve"><value>Wszystkie</value></data>
+
+	<data name="Filter_Type" xml:space="preserve"><value>Typ</value></data>
+	<data name="Filter_Kind" xml:space="preserve"><value>Rodzaj</value></data>
+	<data name="Filter_Status" xml:space="preserve"><value>Status</value></data>
+	<data name="Filter_Producer" xml:space="preserve"><value>Producent</value></data>
+	<data name="Filter_Model" xml:space="preserve"><value>Model</value></data>
+	<data name="Filter_Location" xml:space="preserve"><value>Lokalizacja</value></data>
+	<data name="Filter_User" xml:space="preserve"><value>Użytkownik</value></data>
+
+	<data name="AddDevice" xml:space="preserve"><value>Dodaj urządzenie</value></data>
+	<data name="PrintAssetLabel" xml:space="preserve"><value>Drukuj etykietę</value></data>
+
+	<data name="Col_Kind" xml:space="preserve"><value>Rodzaj</value></data>
+	<data name="Col_Hostname" xml:space="preserve"><value>Nazwa</value></data>
+	<data name="Col_User" xml:space="preserve"><value>Użytkownik</value></data>
+	<data name="Col_Location" xml:space="preserve"><value>Lokalizacja</value></data>
+	<data name="Col_Model" xml:space="preserve"><value>Model</value></data>
+	<data name="Col_SerialNumber" xml:space="preserve"><value>Numer seryjny</value></data>
+	<data name="Col_AssetNo" xml:space="preserve"><value>Nr assetu</value></data>
+	<data name="Col_Status" xml:space="preserve"><value>Status</value></data>
+
+	<data name="NoRecords" xml:space="preserve"><value>Brak urządzeń dla aktualnych filtrów.</value></data>
+
+	<data name="Overlay_Loading" xml:space="preserve"><value>Ładowanie danych...</value></data>
+	<data name="Overlay_Printing" xml:space="preserve"><value>Drukowanie etykiet...</value></data>
+
+	<data name="Dialog_NewDeviceTitle" xml:space="preserve"><value>Nowe urządzenie</value></data>
+	<data name="Dialog_DeviceTitle" xml:space="preserve"><value>Urządzenie</value></data>
+
+	<data name="Msg_LoadLookupsFailed" xml:space="preserve"><value>Nie udało się wczytać słowników filtrów.</value></data>
+	<data name="Msg_LoadLookupsError" xml:space="preserve"><value>Błąd podczas ładowania słowników filtrów.</value></data>
+
+	<data name="Msg_LoadDevicesFailed" xml:space="preserve"><value>Nie udało się wczytać urządzeń.</value></data>
+	<data name="Msg_NoViewPermissionDevices" xml:space="preserve"><value>Brak uprawnień do podglądu urządzeń.</value></data>
+	<data name="Msg_LoadTryLater" xml:space="preserve"><value>Nie udało się wczytać urządzeń. Spróbuj ponownie później.</value></data>
+	<data name="Msg_LoadDataError" xml:space="preserve"><value>Błąd podczas ładowania danych.</value></data>
+
+	<data name="Msg_InvalidId" xml:space="preserve"><value>Nie można otworzyć podglądu, ponieważ identyfikator rekordu jest nieprawidłowy.</value></data>
+	<data name="Msg_NoEditPermission" xml:space="preserve"><value>Brak uprawnień do edycji urządzeń.</value></data>
+	<data name="Msg_NoAddPermission" xml:space="preserve"><value>Brak uprawnień do dodawania urządzeń.</value></data>
+
+	<data name="Msg_SelectAtLeastOne" xml:space="preserve"><value>Zaznacz co najmniej jedno urządzenie do druku.</value></data>
+	<data name="Msg_NoPrinterIp" xml:space="preserve"><value>Brak konfiguracji: Zebra:DevicesLabelPrinterIp.</value></data>
+	<data name="Msg_BadPrinterPort" xml:space="preserve"><value>Błędna konfiguracja: Zebra:DevicesLabelPrinterPort.</value></data>
+	<data name="Msg_NoRecordsToPrint" xml:space="preserve"><value>Nie znaleziono rekordów do druku (selekcja nie pasuje do danych).</value></data>
+	<data name="Msg_LabelsSent" xml:space="preserve"><value>Wysłano etykiety do drukarki. Ilość: {0}.</value></data>
+	<data name="Msg_PrintFailed" xml:space="preserve"><value>Nie udało się wydrukować etykiet.</value></data>
+</root>

@@ -1,0 +1,227 @@
+﻿@page "/wms/parts"
+@rendermode InteractiveServer
+
+@* File: Components/Pages/Wms/PartsIndex.razor
+   Description: Lista części montażowych (WMS) z wyszukiwaniem i edycją w dialogu.
+   Updated: 2026-01-24
+     - FIX: poprawne bindowanie parametrów (Visible, RowsPerPageOptions, Justify)
+     - FIX: brakujące using (List, CancellationToken)
+     - UX: overlay odświeżany przez StateHasChanged podczas ładowania
+*@
+
+@using System
+@using System.Linq
+@using System.Collections.Generic
+@using System.Threading
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Models.Wms
+@using ITManager.Services.Wms
+@using ITManager.Components.Pages.Wms
+
+@inject WmsPartsRepository PartsRepository
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5" Color="Color.Primary">Części montażowe</MudText>
+
+                <MudTooltip Text="Odśwież">
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Primary"
+                                   Size="Size.Small"
+                                   Disabled="@_isLoading"
+                                   OnClick="ReloadAsync" />
+                </MudTooltip>
+            </MudStack>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@_isLoading"
+                       OnClick="AddNewAsync">
+                Dodaj
+            </MudButton>
+        </MudStack>
+
+        <MudText Typo="Typo.body2" Color="Color.Default">
+            Wyszukuj po system number, short system number lub nazwie części.
+        </MudText>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudTextField T="string"
+                          Value="@(_search ?? string.Empty)"
+                          ValueChanged="OnSearchChangedAsync"
+                          Placeholder="Szukaj"
+                          Immediate="true"
+                          DebounceInterval="250"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Disabled="@_isLoading"
+                          Class="flex-grow-1" />
+
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Clear"
+                       Disabled="@(_isLoading || string.IsNullOrWhiteSpace(_search))"
+                       OnClick="ClearSearchAsync">
+                Wyczyść
+            </MudButton>
+        </MudStack>
+
+        <div style="position: relative;">
+            <MudOverlay Visible="@_isLoading" Absolute="true" DarkBackground="true" ZIndex="5">
+                <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="2" Class="pa-6">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                    <MudText>Ładowanie danych</MudText>
+                </MudStack>
+            </MudOverlay>
+
+            <MudDataGrid T="WmsAssemblyPartListItemDto"
+                         @ref="_grid"
+                         @key="_gridKey"
+                         ServerData="LoadServerDataAsync"
+                         Hover="true"
+                         Dense="true"
+                         Elevation="0"
+                         Bordered="false"
+                         RowClick="OnRowClickAsync"
+                         RowsPerPage="20"
+                         RowsPerPageOptions="@(new int[] { 10, 20, 50 })">
+
+                <Columns>
+                    <PropertyColumn Property="x => x.SystemNumber" Title="System number" Sortable="true" />
+                    <PropertyColumn Property="x => x.ShortSystemNumber" Title="Short" Sortable="true" />
+                    <PropertyColumn Property="x => x.PartName" Title="Nazwa" Sortable="true" />
+                    <PropertyColumn Property="x => x.MaxQuantityPerContainer" Title="Max w pojemniku" Sortable="true" />
+                    <PropertyColumn Property="x => x.PartWeight" Title="Waga" Sortable="true" />
+                    <PropertyColumn Property="x => x.UnitSymbol" Title="JM" Sortable="false" />
+                </Columns>
+
+                <NoRecordsContent>
+                    <MudText>Brak danych</MudText>
+                </NoRecordsContent>
+            </MudDataGrid>
+        </div>
+
+    </MudStack>
+</MudPaper>
+
+@code {
+    private MudDataGrid<WmsAssemblyPartListItemDto>? _grid;
+
+    private string? _search;
+    private bool _isLoading;
+
+    private int _gridKey = 1;
+
+    private async Task<GridData<WmsAssemblyPartListItemDto>> LoadServerDataAsync(GridState<WmsAssemblyPartListItemDto> state)
+    {
+        _isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var sort = state.SortDefinitions?.FirstOrDefault();
+            var sortBy = sort?.SortBy;
+            var sortDesc = sort?.Descending ?? false;
+
+            var (items, total) = await PartsRepository.SearchPartsAsync(
+                search: _search,
+                pageIndex: state.Page,
+                pageSize: state.PageSize,
+                sortColumn: sortBy,
+                sortDesc: sortDesc,
+                ct: CancellationToken.None);
+
+            return new GridData<WmsAssemblyPartListItemDto>
+            {
+                Items = items ?? new List<WmsAssemblyPartListItemDto>(),
+                TotalItems = total
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WMS Parts] LoadServerDataAsync ERROR: {ex}");
+            Snackbar.Add("Nie udało się wczytać danych z bazy.", Severity.Error);
+
+            return new GridData<WmsAssemblyPartListItemDto>
+            {
+                Items = new List<WmsAssemblyPartListItemDto>(),
+                TotalItems = 0
+            };
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnRowClickAsync(DataGridRowClickEventArgs<WmsAssemblyPartListItemDto> args)
+    {
+        if (_isLoading)
+            return;
+
+        if (args.Item is null)
+            return;
+
+        await OpenEditDialogAsync(args.Item.Id);
+    }
+
+    private Task AddNewAsync()
+        => OpenEditDialogAsync(0);
+
+    private async Task OpenEditDialogAsync(int id)
+    {
+        var parameters = new DialogParameters
+        {
+            ["PartId"] = id
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            FullWidth = true,
+            MaxWidth = MaxWidth.Medium,
+            BackdropClick = false
+        };
+
+        var dialog = DialogService.Show<WmsPartEditDialog>(
+            id <= 0 ? "Dodaj część" : "Edytuj część",
+            parameters,
+            options);
+
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            Snackbar.Add("Zapisano.", Severity.Success);
+            await ReloadAsync();
+        }
+    }
+
+    private Task ReloadAsync()
+        => _grid is null ? Task.CompletedTask : _grid.ReloadServerData();
+
+    private async Task OnSearchChangedAsync(string value)
+    {
+        _search = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        _gridKey++; // resetuje grid (sort, page) przy zmianie wyszukiwania
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        _search = null;
+
+        _gridKey++; // resetuje grid
+        await InvokeAsync(StateHasChanged);
+    }
+}

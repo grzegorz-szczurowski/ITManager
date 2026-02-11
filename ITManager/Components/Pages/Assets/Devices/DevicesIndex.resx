@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title" xml:space="preserve">
+    <value>Devices</value>
+  </data>
+
+	<!-- Toolbar -->
+	<data name="SearchPlaceholder" xml:space="preserve">
+    <value>Search in: type, hostname, user, location, producer, model, SN, asset no, status</value>
+  </data>
+	<data name="ClearFilters" xml:space="preserve">
+    <value>Clear filters</value>
+  </data>
+	<data name="AdvancedFilters" xml:space="preserve">
+    <value>Advanced filters</value>
+  </data>
+
+	<!-- Permissions -->
+	<data name="NoViewPermission" xml:space="preserve">
+    <value>You do not have permission to view devices.</value>
+  </data>
+	<data name="Msg_NoViewPermissionDevices" xml:space="preserve">
+    <value>You do not have permission to view devices.</value>
+  </data>
+	<data name="Msg_NoEditPermission" xml:space="preserve">
+    <value>You do not have permission to edit devices.</value>
+  </data>
+	<data name="Msg_NoAddPermission" xml:space="preserve">
+    <value>You do not have permission to add devices.</value>
+  </data>
+
+	<!-- Common -->
+	<data name="All" xml:space="preserve">
+    <value>All</value>
+  </data>
+
+	<!-- Filters -->
+	<data name="Filter_Type" xml:space="preserve">
+    <value>Type</value>
+  </data>
+	<data name="Filter_Kind" xml:space="preserve">
+    <value>Kind</value>
+  </data>
+	<data name="Filter_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+	<data name="Filter_Producer" xml:space="preserve">
+    <value>Producer</value>
+  </data>
+	<data name="Filter_Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Filter_Location" xml:space="preserve">
+    <value>Location</value>
+  </data>
+	<data name="Filter_User" xml:space="preserve">
+    <value>User</value>
+  </data>
+
+	<!-- Actions -->
+	<data name="AddDevice" xml:space="preserve">
+    <value>Add device</value>
+  </data>
+	<data name="ExportExcel" xml:space="preserve">
+    <value>Export Excel</value>
+  </data>
+	<data name="PrintAssetLabel" xml:space="preserve">
+    <value>Print label</value>
+  </data>
+
+	<!-- Grid columns -->
+	<data name="Col_Kind" xml:space="preserve">
+    <value>Kind</value>
+  </data>
+	<data name="Col_Hostname" xml:space="preserve">
+    <value>Hostname</value>
+  </data>
+	<data name="Col_User" xml:space="preserve">
+    <value>User</value>
+  </data>
+	<data name="Col_Location" xml:space="preserve">
+    <value>Location</value>
+  </data>
+	<data name="Col_Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+	<data name="Col_SerialNumber" xml:space="preserve">
+    <value>Serial number</value>
+  </data>
+	<data name="Col_AssetNo" xml:space="preserve">
+    <value>Asset no</value>
+  </data>
+	<data name="Col_Status" xml:space="preserve">
+    <value>Status</value>
+  </data>
+
+	<!-- Grid -->
+	<data name="NoRecords" xml:space="preserve">
+    <value>No records found for current filters.</value>
+  </data>
+
+	<!-- Overlay -->
+	<data name="Overlay_Loading" xml:space="preserve">
+    <value>Loading data...</value>
+  </data>
+	<data name="Overlay_Printing" xml:space="preserve">
+    <value>Printing...</value>
+  </data>
+
+	<!-- Messages -->
+	<data name="Msg_LoadLookupsFailed" xml:space="preserve">
+    <value>Failed to load filter lookups.</value>
+  </data>
+	<data name="Msg_LoadLookupsError" xml:space="preserve">
+    <value>Error while loading filter lookups.</value>
+  </data>
+	<data name="Msg_LoadDevicesFailed" xml:space="preserve">
+    <value>Failed to load devices.</value>
+  </data>
+	<data name="Msg_LoadTryLater" xml:space="preserve">
+    <value>Failed to load data. Please try again later.</value>
+  </data>
+	<data name="Msg_LoadDataError" xml:space="preserve">
+    <value>Error while loading data.</value>
+  </data>
+	<data name="Msg_InvalidId" xml:space="preserve">
+    <value>Invalid record ID.</value>
+  </data>
+
+	<data name="Dialog_NewDeviceTitle" xml:space="preserve">
+    <value>New device</value>
+  </data>
+	<data name="Dialog_DeviceTitle" xml:space="preserve">
+    <value>Edit device</value>
+  </data>
+
+	<data name="Msg_SelectAtLeastOne" xml:space="preserve">
+    <value>Select at least one record.</value>
+  </data>
+	<data name="Msg_NoPrinterIp" xml:space="preserve">
+    <value>Label printer IP is not configured.</value>
+  </data>
+	<data name="Msg_BadPrinterPort" xml:space="preserve">
+    <value>Invalid printer port.</value>
+  </data>
+	<data name="Msg_NoRecordsToPrint" xml:space="preserve">
+    <value>No records to print.</value>
+  </data>
+	<data name="Msg_LabelsSent" xml:space="preserve">
+    <value>Sent to print: {0} labels.</value>
+  </data>
+	<data name="Msg_PrintFailed" xml:space="preserve">
+    <value>Failed to print labels. Please try again.</value>
+  </data>
+
+	<data name="Msg_NoRecordsToExport" xml:space="preserve">
+    <value>No data to export.</value>
+  </data>
+	<data name="Msg_ExportDone" xml:space="preserve">
+    <value>Export completed.</value>
+  </data>
+	<data name="Msg_ExportFailed" xml:space="preserve">
+    <value>Export failed. Please try again.</value>
+  </data>
+
+</root>

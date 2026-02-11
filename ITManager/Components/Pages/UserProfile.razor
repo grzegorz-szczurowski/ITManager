@@ -1,0 +1,280 @@
+﻿@page "/user/profile"
+@rendermode InteractiveServer
+
+@using ITManager.Models
+@using System
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@inject ContactsService ContactsService
+@inject ContactUpdateService ContactUpdateService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ITManager.Services.Auth.CurrentUserContextService CurrentUserContextService
+@inject IStringLocalizer<UserProfile> L
+
+@* File: Components/Pages/UserProfile.razor
+   Description: Formularz zgłoszenia aktualizacji danych kontaktowych (wysyłka do admina).
+   Created: 2025-12-21
+   Updated: 2025-12-21 - returnUrl po wysłaniu, aby wracać na stronę konta
+   Updated: 2026-01-28 - SECURITY: ownershipCheck dla ContactUpdateService (wysyłka tylko dla własnego kontaktu)
+   Updated: 2026-01-28 - FIX: ownershipCheck nie polega na _currentContact.ObjectGuid (może nie być mapowany z DB)
+   Updated: 2026-02-03 - UX: po wysłaniu przekieruj na /contacts
+   Updated: 2026-02-03 - i18n: lokalizacja UI i komunikatów przez resx obok komponentu
+   Version: 1.07 *@
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        <MudText Typo="Typo.h5">@L["Title.ContactData"]</MudText>
+
+        <MudAlert Severity="Severity.Info"
+                  Variant="Variant.Outlined"
+                  Dense="true"
+                  Icon="@Icons.Material.Filled.Info">
+            @L["Info.FillOnlyChangedFields"]
+            <br />
+            @L["Info.ChangesSentToAdmin"]
+        </MudAlert>
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">
+                @_errorMessage
+            </MudAlert>
+        }
+
+        @if (_isLoading)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.Center" Class="mt-4">
+                <MudProgressCircular Size="Size.Large" Indeterminate="true" />
+                <MudText Class="ms-4">@L["Loading.ContactData"]</MudText>
+            </MudStack>
+        }
+        else if (!_isAuthenticated)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                @L["Warning.DomainOnly"]
+            </MudAlert>
+        }
+        else if (_currentContact is null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                @L["Warning.ContactNotFound"]
+            </MudAlert>
+        }
+        else
+        {
+            <MudPaper Class="pa-4 mt-2" Elevation="0">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Section.NewData"]</MudText>
+
+                <MudGrid GutterSize="GutterSize.Small">
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="_proposedImie" Label="@L["Field.NewFirstName.Label"]" Placeholder="@_currentContact.Imie" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedNazwisko" Label="@L["Field.NewLastName.Label"]" Placeholder="@_currentContact.Nazwisko" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedDzial" Label="@L["Field.NewDepartment.Label"]" Placeholder="@_currentContact.Dzial" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedStanowisko" Label="@L["Field.NewJobTitle.Label"]" Placeholder="@_currentContact.Stanowisko" FullWidth="true" Margin="Margin.Dense" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="_proposedWewnetrzny" Label="@L["Field.NewInternalPhone.Label"]" Placeholder="@_currentContact.Wewnetrzny" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedStacjonarny" Label="@L["Field.NewLandlinePhone.Label"]" Placeholder="@_currentContact.Stacjonarny" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedKomorkowy" Label="@L["Field.NewMobilePhone.Label"]" Placeholder="@_currentContact.Komorkowy" FullWidth="true" Margin="Margin.Dense" />
+                        <MudTextField @bind-Value="_proposedEmail" Label="@L["Field.NewEmail.Label"]" Placeholder="@_currentContact.Email" FullWidth="true" Margin="Margin.Dense" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-4" Elevation="0">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">@L["Section.AdditionalInfoForAdmin"]</MudText>
+
+                <MudTextField @bind-Value="_userMessage"
+                              Label="@L["Field.Message.Label"]"
+                              Placeholder="@L["Field.Message.Placeholder"]"
+                              Lines="4"
+                              FullWidth="true"
+                              Margin="Margin.Dense"
+                              TextFieldStyle="TextFieldStyle.Outlined"
+                              AutoResize="true" />
+            </MudPaper>
+
+            <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-4">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Secondary"
+                           OnClick="NavigateBack"
+                           Disabled="_isSending">
+                    @L["Button.Cancel"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="SendUpdateAsync"
+                           Disabled="_isSending"
+                           Loading="_isSending">
+                    @L["Button.Send"]
+                </MudButton>
+            </MudStack>
+        }
+
+    </MudStack>
+
+</MudPaper>
+
+@code
+{
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private Contact? _currentContact;
+    private bool _isLoading;
+    private bool _isSending;
+    private string? _errorMessage;
+    private bool _isAuthenticated;
+
+    private Guid _currentUserObjectGuid;
+
+    private string? _proposedImie;
+    private string? _proposedNazwisko;
+    private string? _proposedDzial;
+    private string? _proposedStanowisko;
+    private string? _proposedWewnetrzny;
+    private string? _proposedStacjonarny;
+    private string? _proposedKomorkowy;
+    private string? _proposedEmail;
+    private string? _userMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadContactAsync();
+    }
+
+    private async Task LoadContactAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        _currentUserObjectGuid = Guid.Empty;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+
+            var ctx = CurrentUserContextService.CurrentUser;
+            _isAuthenticated = ctx != null && ctx.IsAuthenticated;
+
+            if (!_isAuthenticated)
+                return;
+
+            var objectGuid = ResolveObjectGuid(ctx);
+            if (objectGuid == Guid.Empty)
+            {
+                _errorMessage = L["Error.ResolveUserIdFailed"];
+                return;
+            }
+
+            _currentUserObjectGuid = objectGuid;
+
+            _currentContact = await ContactsService.GetContactByObjectGuidAsync(objectGuid);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = L["Error.LoadContactFailed"];
+            Console.Error.WriteLine($"[MyContactInfo] LoadContactAsync error: {ex}");
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Guid ResolveObjectGuid(dynamic ctx)
+    {
+        try
+        {
+            try
+            {
+                Guid g = ctx.ObjectGuid;
+                return g;
+            }
+            catch { }
+
+            try
+            {
+                string s = ctx.ObjectGuid;
+                if (!string.IsNullOrWhiteSpace(s) && Guid.TryParse(s, out var parsed))
+                    return parsed;
+            }
+            catch { }
+
+            return Guid.Empty;
+        }
+        catch
+        {
+            return Guid.Empty;
+        }
+    }
+
+    private async Task SendUpdateAsync()
+    {
+        if (_currentContact is null)
+            return;
+
+        _isSending = true;
+        _errorMessage = null;
+
+        try
+        {
+            if (_currentUserObjectGuid == Guid.Empty)
+                throw new InvalidOperationException(L["Error.MissingLoggedUserId"]);
+
+            var updatedContact = new Contact
+            {
+                Imie = string.IsNullOrWhiteSpace(_proposedImie) ? _currentContact.Imie : _proposedImie,
+                Nazwisko = string.IsNullOrWhiteSpace(_proposedNazwisko) ? _currentContact.Nazwisko : _proposedNazwisko,
+                Dzial = string.IsNullOrWhiteSpace(_proposedDzial) ? _currentContact.Dzial : _proposedDzial,
+                Stanowisko = string.IsNullOrWhiteSpace(_proposedStanowisko) ? _currentContact.Stanowisko : _proposedStanowisko,
+                Wewnetrzny = string.IsNullOrWhiteSpace(_proposedWewnetrzny) ? _currentContact.Wewnetrzny : _proposedWewnetrzny,
+                Stacjonarny = string.IsNullOrWhiteSpace(_proposedStacjonarny) ? _currentContact.Stacjonarny : _proposedStacjonarny,
+                Komorkowy = string.IsNullOrWhiteSpace(_proposedKomorkowy) ? _currentContact.Komorkowy : _proposedKomorkowy,
+                Email = string.IsNullOrWhiteSpace(_proposedEmail) ? _currentContact.Email : _proposedEmail,
+
+                ObjectGuid = _currentUserObjectGuid,
+                DisplayName = _currentContact.DisplayName
+            };
+
+            Func<bool> ownershipCheck = () =>
+                _currentUserObjectGuid != Guid.Empty
+                && updatedContact.ObjectGuid == _currentUserObjectGuid;
+
+            await ContactUpdateService.SendContactUpdateRequestAsync(_currentContact, updatedContact, _userMessage, ownershipCheck);
+
+            Snackbar.Add(L["Snackbar.UpdateRequestSent"], Severity.Success);
+
+            NavigationManager.NavigateTo("/contacts");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = L["Error.SendRequestFailed"];
+            Console.Error.WriteLine($"[MyContactInfo] SendUpdateAsync error: {ex}");
+            Snackbar.Add(L["Snackbar.SendRequestError"], Severity.Error);
+        }
+        finally
+        {
+            _isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateBack()
+    {
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+            return;
+        }
+
+        NavigationManager.NavigateTo("/my/account");
+    }
+}

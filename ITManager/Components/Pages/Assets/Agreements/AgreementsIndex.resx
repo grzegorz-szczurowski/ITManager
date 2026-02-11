@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<!-- Page -->
+	<data name="Title">
+		<value>Agreements</value>
+	</data>
+
+	<!-- Toolbar -->
+	<data name="Refresh_AriaLabel">
+		<value>Refresh</value>
+	</data>
+	<data name="Search_Placeholder">
+		<value>Search in agreements</value>
+	</data>
+	<data name="ClearFilters">
+		<value>Clear filters</value>
+	</data>
+	<data name="AdvancedFilters">
+		<value>Advanced filters</value>
+	</data>
+
+	<!-- RBAC -->
+	<data name="NoPermission_View">
+		<value>You do not have permission to view agreements.</value>
+	</data>
+	<data name="NoPermission_Edit">
+		<value>You do not have permission to edit agreements.</value>
+	</data>
+
+	<!-- Errors / loading -->
+	<data name="Loading">
+		<value>Loading data...</value>
+	</data>
+	<data name="LoadError_Generic">
+		<value>Error while loading data.</value>
+	</data>
+	<data name="LoadError_Timeout">
+		<value>Timeout while loading data ({0}s). Check SQL and server logs.</value>
+	</data>
+	<data name="Snackbar_Timeout">
+		<value>Timeout while loading agreements.</value>
+	</data>
+	<data name="Snackbar_LoadFailed">
+		<value>Failed to load agreements.</value>
+	</data>
+	<data name="Snackbar_LoadFailedLater">
+		<value>Failed to load agreements. Please try again later.</value>
+	</data>
+
+	<!-- Filters -->
+	<data name="Filter_Type">
+		<value>Type</value>
+	</data>
+	<data name="Filter_Supplier">
+		<value>Supplier</value>
+	</data>
+	<data name="Filter_Owner">
+		<value>Owner</value>
+	</data>
+	<data name="Filter_Status">
+		<value>Status</value>
+	</data>
+	<data name="Filter_Validity">
+		<value>Validity</value>
+	</data>
+	<data name="Filter_All">
+		<value>All</value>
+	</data>
+
+	<data name="Validity_Active">
+		<value>Active</value>
+	</data>
+	<data name="Validity_Expired">
+		<value>Expired</value>
+	</data>
+	<data name="Validity_EndsSoon">
+		<value>Ends soon (30 days)</value>
+	</data>
+	<data name="Validity_NoDates">
+		<value>No dates</value>
+	</data>
+
+	<!-- Grid columns -->
+	<data name="Col_AgreementName">
+		<value>Agreement name</value>
+	</data>
+	<data name="Col_Type">
+		<value>Type</value>
+	</data>
+	<data name="Col_Supplier">
+		<value>Supplier</value>
+	</data>
+	<data name="Col_Owner">
+		<value>Owner</value>
+	</data>
+	<data name="Col_ValidFrom">
+		<value>Valid from</value>
+	</data>
+	<data name="Col_ValidTo">
+		<value>Valid to</value>
+	</data>
+	<data name="Col_Status">
+		<value>Status</value>
+	</data>
+
+	<!-- No records -->
+	<data name="NoRecords">
+		<value>No agreements found for current filters.</value>
+	</data>
+
+</root>

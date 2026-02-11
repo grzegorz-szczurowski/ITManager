@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Ui.LoadingContact" xml:space="preserve">
+    <value>Trwa wczytywanie danych kontaktu</value>
+  </data>
+	<data name="Ui.ContactDetailsHeader" xml:space="preserve">
+    <value>Dane kontaktowe</value>
+  </data>
+
+	<data name="Field.FirstName" xml:space="preserve">
+    <value>Imię</value>
+  </data>
+	<data name="Field.LastName" xml:space="preserve">
+    <value>Nazwisko</value>
+  </data>
+	<data name="Field.Department" xml:space="preserve">
+    <value>Dział</value>
+  </data>
+	<data name="Field.JobTitle" xml:space="preserve">
+    <value>Stanowisko</value>
+  </data>
+	<data name="Field.PhoneInternal" xml:space="preserve">
+    <value>Telefon wewnętrzny</value>
+  </data>
+	<data name="Field.PhoneLandline" xml:space="preserve">
+    <value>Telefon stacjonarny</value>
+  </data>
+	<data name="Field.PhoneMobile" xml:space="preserve">
+    <value>Telefon komórkowy</value>
+  </data>
+	<data name="Field.Email" xml:space="preserve">
+    <value>E mail</value>
+  </data>
+	<data name="Field.Company" xml:space="preserve">
+    <value>Firma</value>
+  </data>
+
+	<data name="Ui.QrHeader" xml:space="preserve">
+    <value>QR wizytówka</value>
+  </data>
+	<data name="Ui.QrAlt" xml:space="preserve">
+    <value>QR kontakt</value>
+  </data>
+	<data name="Ui.QrNoData" xml:space="preserve">
+    <value>Brak danych do wygenerowania QR.</value>
+  </data>
+	<data name="Ui.QrHint" xml:space="preserve">
+    <value>Zeskanuj telefonem, aby dodać kontakt.</value>
+  </data>
+
+	<data name="Ui.NoDataToShow" xml:space="preserve">
+    <value>Brak danych do wyświetlenia.</value>
+  </data>
+
+	<data name="Action.Close" xml:space="preserve">
+    <value>Zamknij</value>
+  </data>
+
+	<data name="Errors.MissingEmail" xml:space="preserve">
+    <value>Brak adresu e mail kontaktu.</value>
+  </data>
+	<data name="Errors.ContactNotFound" xml:space="preserve">
+    <value>Nie znaleziono kontaktu.</value>
+  </data>
+	<data name="Errors.LoadContactFailed" xml:space="preserve">
+    <value>Wystąpił błąd podczas wczytywania danych kontaktu.</value>
+  </data>
+
+	<data name="Errors.LoadContactLogPrefix" xml:space="preserve">
+    <value>Błąd ładowania kontaktu:</value>
+  </data>
+	<data name="Errors.QrGenerationLogPrefix" xml:space="preserve">
+    <value>Błąd generowania QR:</value>
+  </data>
+</root>

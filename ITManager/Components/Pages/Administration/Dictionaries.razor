@@ -1,0 +1,450 @@
+﻿@namespace ITManager.Components.Pages.Administration
+@page "/admin/dictionaries"
+@rendermode InteractiveServer
+
+@* File: Components/Pages/Admin/Dictionaries.razor
+   Description: Edycja słowników (producers, models, locations) z użyciem jednego modelu UI DictionaryItem.
+                RBAC: dostęp tylko dla Admin.Dictionaries.Manage.
+   Created: 2025-12-23
+   Version: 1.11
+   Change log:
+   - 1.02 (2025-12-23) Poprawa nazwy komponentu dialogu na DictionaryEditDialog + jawny @namespace.
+   - 1.03 (2025-12-25) RBAC: guard na Admin.Dictionaries.Manage.
+   - 1.04 (2025-12-27) Locations: usunięcie kolumny Code z DataGrid i logiki widoku.
+   - 1.05 (2025-12-27) UI: usunięcie akcji (edit/delete). Edycja przez klik w wiersz.
+   - 1.06 (2025-12-27) UI polish: usunięcie nagłówków „Lista …”.
+   - 1.07 (2025-12-27) UI consistency:
+       - Refresh jako ikona przy tytule strony
+       - Dodaj po lewej stronie toolbara tabeli
+   - 1.08 (2026-01-09) RBAC new: twardy guard na ctx.Has("Admin.Dictionaries.Manage"), overlay loader, defensywne blokady akcji
+   - 1.09 (2026-01-26) UI: wyszukiwarka per zakładka + filtrowanie zawartości MudDataGrid
+   - 1.10 (2026-01-26) UI: wyszukiwarka wyrównana do prawej krawędzi (jak DevicesIndex)
+   - 1.11 (2026-01-26) i18n: przeniesienie stringów UI do resx (IStringLocalizer)
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using MudBlazor
+@using ITManager.Models
+@using ITManager.Services
+@using ITManager.Services.Auth
+
+@inject DictionariesService DictionariesService
+@inject CurrentUserContextService CurrentUserContextService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager NavigationManager
+@inject IStringLocalizer<Dictionaries> L
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="2">
+
+        @* Nagłówek strony *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="dictionaries-header">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Default"
+                               Disabled="@_isBusy"
+                               OnClick="ReloadActiveAsync"
+                               Class="ml-1"
+                               Title="@L["Refresh"]" />
+            </MudStack>
+        </MudStack>
+
+        @if (!_canManage)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoPermissionManage"]
+            </MudAlert>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(_loadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_loadError</MudAlert>
+            }
+
+            <MudTabs Rounded="true"
+                     ActivePanelIndex="@_activeTabIndex"
+                     ActivePanelIndexChanged="OnTabChangedAsync">
+
+                <MudTabPanel Text="@L["Tab_Producers"]">
+                    @RenderToolbar(DictionaryKind.Producers)
+                    @RenderGrid(DictionaryKind.Producers, _producers)
+                </MudTabPanel>
+
+                <MudTabPanel Text="@L["Tab_Models"]">
+                    @RenderToolbar(DictionaryKind.Models)
+                    @RenderGrid(DictionaryKind.Models, _models)
+                </MudTabPanel>
+
+                <MudTabPanel Text="@L["Tab_Locations"]">
+                    @RenderToolbar(DictionaryKind.Locations)
+                    @RenderGrid(DictionaryKind.Locations, _locations)
+                </MudTabPanel>
+
+            </MudTabs>
+        }
+
+    </MudStack>
+
+    @* Loader overlay spójny z innymi stronami *@
+    <MudOverlay Visible="@_isBusy"
+                DarkBackground="true"
+                AutoClose="false"
+                ZIndex="1300">
+        <MudPaper Class="pa-6" Style="border-radius:12px; min-width:260px;">
+            <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                <MudText Typo="Typo.subtitle1">@L["LoadingData"]</MudText>
+            </MudStack>
+        </MudPaper>
+    </MudOverlay>
+
+</MudPaper>
+
+<style>
+    .dictionaries-header {
+        gap: 8px;
+    }
+
+    .dict-toolbar {
+        gap: 12px;
+    }
+
+    .dict-search {
+        min-width: 220px;
+        width: min(520px, 45vw);
+    }
+</style>
+
+@code
+{
+    private const string PermManage = "Admin.Dictionaries.Manage";
+
+    private enum DictionaryKind
+    {
+        Producers = 0,
+        Models = 1,
+        Locations = 2
+    }
+
+    private bool _isBusy;
+    private string _loadError = string.Empty;
+    private int _activeTabIndex;
+
+    private bool _canManage;
+
+    private List<DictionaryItem> _producers = new();
+    private List<DictionaryItem> _models = new();
+    private List<DictionaryItem> _locations = new();
+
+    private string _searchProducers = string.Empty;
+    private string _searchModels = string.Empty;
+    private string _searchLocations = string.Empty;
+
+    private DictionaryKind ActiveKind => (DictionaryKind)_activeTabIndex;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        var ctx = CurrentUserContextService.CurrentUser;
+
+        _canManage = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has(PermManage);
+        if (!_canManage)
+        {
+            NavigationManager.NavigateTo("/", replace: true);
+            return;
+        }
+
+        await ReloadAllAsync();
+    }
+
+    private Task OnTabChangedAsync(int newIndex)
+    {
+        _activeTabIndex = newIndex;
+        return Task.CompletedTask;
+    }
+
+    private bool CanEdit() => _canManage && !_isBusy;
+
+    private RenderFragment RenderToolbar(DictionaryKind kind) => @<MudStack Row="true"
+                                                                                AlignItems="AlignItems.Center"
+                                                                                Justify="Justify.SpaceBetween"
+                                                                                Class="mt-2 mb-2 dict-toolbar">
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@(!CanEdit())"
+                   OnClick="() => OpenAddDialogAsync(kind)">
+            @L["Add"]
+        </MudButton>
+
+        <MudTextField T="string"
+                      Value="@GetSearch(kind)"
+                      ValueChanged="(string v) => OnSearchChanged(kind, v)"
+                      Placeholder="@GetSearchPlaceholder(kind)"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      Clearable="true"
+                      Immediate="true"
+                      DebounceInterval="200"
+                      Disabled="@_isBusy"
+                      Class="dict-search" />
+
+    </MudStack>;
+
+    private RenderFragment RenderGrid(DictionaryKind kind, List<DictionaryItem> items) => @<MudDataGrid T="DictionaryItem"
+                                                                                                        Items="@GetFilteredItems(kind, items)"
+                                                                                                        Dense="true"
+                                                                                                        Hover="true"
+                                                                                                        Bordered="false"
+                                                                                                        Elevation="0"
+                                                                                                        Loading="false"
+                                                                                                        Breakpoint="Breakpoint.Sm"
+                                                                                                        RowClick="@(args => OnRowClickAsync(kind, args.Item))">
+
+    <Columns>
+        <PropertyColumn Property="x => x.Name" Title="@L["Col_Name"]" />
+
+        @if (kind == DictionaryKind.Models)
+                {
+        <PropertyColumn Property="x => x.ParentName" Title="@L["Col_Producer"]" />
+                }
+
+        <PropertyColumn Property="x => x.IsActive" Title="@L["Col_Active"]" />
+    </Columns>
+
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="pa-4">@L["NoData"]</MudText>
+    </NoRecordsContent>
+</MudDataGrid>;
+
+    private string GetSearch(DictionaryKind kind)
+    {
+        if (kind == DictionaryKind.Producers) return _searchProducers;
+        if (kind == DictionaryKind.Models) return _searchModels;
+        return _searchLocations;
+    }
+
+    private void OnSearchChanged(DictionaryKind kind, string value)
+    {
+        value ??= string.Empty;
+
+        if (kind == DictionaryKind.Producers) _searchProducers = value;
+        else if (kind == DictionaryKind.Models) _searchModels = value;
+        else _searchLocations = value;
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private string GetSearchPlaceholder(DictionaryKind kind)
+    {
+        if (kind == DictionaryKind.Producers) return L["Search_Producers"];
+        if (kind == DictionaryKind.Models) return L["Search_Models"];
+        return L["Search_Locations"];
+    }
+
+    private IEnumerable<DictionaryItem> GetFilteredItems(DictionaryKind kind, List<DictionaryItem> items)
+    {
+        items ??= new();
+
+        var q = (GetSearch(kind) ?? string.Empty).Trim();
+        if (q.Length == 0)
+            return items;
+
+        return items
+            .Where(x => MatchesSearch(kind, x, q))
+            .ToList();
+    }
+
+    private static bool MatchesSearch(DictionaryKind kind, DictionaryItem item, string q)
+    {
+        if (item is null)
+            return false;
+
+        var name = item.Name ?? string.Empty;
+        if (name.Contains(q, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (kind == DictionaryKind.Models)
+        {
+            var parent = item.ParentName ?? string.Empty;
+            if (parent.Contains(q, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private async Task ReloadAllAsync()
+    {
+        if (!_canManage)
+            return;
+
+        _isBusy = true;
+        _loadError = string.Empty;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            _producers = await DictionariesService.GetProducersAsync() ?? new();
+            _models = await DictionariesService.GetModelsAsync() ?? new();
+            _locations = await DictionariesService.GetLocationsAsync() ?? new();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Dictionaries] ReloadAll ERROR: {ex}");
+            _loadError = L["LoadError"];
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task ReloadActiveAsync() => ReloadSingleAsync(ActiveKind);
+
+    private async Task ReloadSingleAsync(DictionaryKind kind)
+    {
+        if (!_canManage)
+            return;
+
+        _isBusy = true;
+        _loadError = string.Empty;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            if (kind == DictionaryKind.Producers)
+            {
+                _producers = await DictionariesService.GetProducersAsync() ?? new();
+                _models = await DictionariesService.GetModelsAsync() ?? new();
+            }
+            else if (kind == DictionaryKind.Models)
+            {
+                _models = await DictionariesService.GetModelsAsync() ?? new();
+            }
+            else
+            {
+                _locations = await DictionariesService.GetLocationsAsync() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Dictionaries] ReloadSingle ERROR: {ex}");
+            _loadError = L["LoadError"];
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static DictionaryItem Clone(DictionaryItem src) => new()
+    {
+        Id = src.Id,
+        Name = src.Name,
+        ParentId = src.ParentId,
+        ParentName = src.ParentName,
+        IsActive = src.IsActive
+    };
+
+    private async Task OnRowClickAsync(DictionaryKind kind, DictionaryItem item)
+    {
+        if (!CanEdit())
+            return;
+
+        if (item is null)
+            return;
+
+        await OpenDialogInternalAsync(kind, Clone(item), isNew: false);
+    }
+
+    private Task OpenAddDialogAsync(DictionaryKind kind)
+    {
+        if (!CanEdit())
+            return Task.CompletedTask;
+
+        var item = new DictionaryItem
+        {
+            Id = 0,
+            Name = string.Empty,
+            ParentId = null,
+            ParentName = null,
+            IsActive = true
+        };
+
+        return OpenDialogInternalAsync(kind, item, isNew: true);
+    }
+
+    private async Task OpenDialogInternalAsync(DictionaryKind kind, DictionaryItem item, bool isNew)
+    {
+        if (!_canManage)
+            return;
+
+        var title = isNew ? L["Dialog_AddEntry"] : L["Dialog_EditEntry"];
+
+        var parameters = new DialogParameters
+        {
+            ["Title"] = title,
+            ["Kind"] = kind.ToString(),
+            ["Item"] = item,
+            ["Producers"] = (_producers ?? new()).OrderBy(x => x.Name).ToList()
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            FullWidth = true,
+            MaxWidth = MaxWidth.Small
+        };
+
+        var dialog = DialogService.Show<DictionaryEditDialog>(string.Empty, parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled != false || result.Data is not DictionaryItem savedItem)
+            return;
+
+        _isBusy = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            if (kind == DictionaryKind.Producers)
+                await DictionariesService.SaveProducerAsync(savedItem);
+            else if (kind == DictionaryKind.Models)
+                await DictionariesService.SaveModelAsync(savedItem);
+            else
+                await DictionariesService.SaveLocationAsync(savedItem);
+
+            Snackbar.Add(L["Saved"], Severity.Success);
+            await ReloadSingleAsync(kind);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add(L["NoPermissionSave"], Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Dictionaries] Save ERROR: {ex}");
+            Snackbar.Add(L["SaveFailed"], Severity.Error);
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

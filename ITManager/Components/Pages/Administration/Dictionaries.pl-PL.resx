@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Słowniki</value>
+  </data>
+	<data name="Refresh" xml:space="preserve">
+    <value>Odśwież</value>
+  </data>
+
+	<data name="NoPermissionManage" xml:space="preserve">
+    <value>Brak uprawnień do zarządzania słownikami.</value>
+  </data>
+
+	<data name="Tab_Producers" xml:space="preserve">
+    <value>Producenci</value>
+  </data>
+	<data name="Tab_Models" xml:space="preserve">
+    <value>Modele</value>
+  </data>
+	<data name="Tab_Locations" xml:space="preserve">
+    <value>Lokalizacje</value>
+  </data>
+
+	<data name="Add" xml:space="preserve">
+    <value>Dodaj</value>
+  </data>
+
+	<data name="Search_Producers" xml:space="preserve">
+    <value>Szukaj producenta...</value>
+  </data>
+	<data name="Search_Models" xml:space="preserve">
+    <value>Szukaj modelu lub producenta...</value>
+  </data>
+	<data name="Search_Locations" xml:space="preserve">
+    <value>Szukaj lokalizacji...</value>
+  </data>
+
+	<data name="Col_Name" xml:space="preserve">
+    <value>Nazwa</value>
+  </data>
+	<data name="Col_Producer" xml:space="preserve">
+    <value>Producent</value>
+  </data>
+	<data name="Col_Active" xml:space="preserve">
+    <value>Aktywny</value>
+  </data>
+
+	<data name="NoData" xml:space="preserve">
+    <value>Brak danych.</value>
+  </data>
+
+	<data name="LoadingData" xml:space="preserve">
+    <value>Ładowanie danych...</value>
+  </data>
+
+	<data name="LoadError" xml:space="preserve">
+    <value>Błąd podczas ładowania danych.</value>
+  </data>
+
+	<data name="Dialog_AddEntry" xml:space="preserve">
+    <value>Dodaj wpis</value>
+  </data>
+	<data name="Dialog_EditEntry" xml:space="preserve">
+    <value>Edytuj wpis</value>
+  </data>
+
+	<data name="Saved" xml:space="preserve">
+    <value>Zapisano.</value>
+  </data>
+	<data name="NoPermissionSave" xml:space="preserve">
+    <value>Brak uprawnień do zapisu.</value>
+  </data>
+	<data name="SaveFailed" xml:space="preserve">
+    <value>Nie udało się zapisać zmian.</value>
+  </data>
+</root>

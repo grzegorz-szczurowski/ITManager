@@ -1,0 +1,505 @@
+﻿@page "/projects"
+@rendermode InteractiveServer
+
+@* File: Components/Pages/Projects/ProjectsIndex.razor
+   Description: Lista projektów (Projects list) w oparciu o MudDataGrid.
+                UI spójny z DevicesIndex: search + clear + advanced filters + overlay kontenera treści.
+   Version: 1.19
+   Created: 2026-01-25
+   Updated:
+   - 2026-01-25 - UX: toolbar jak DevicesIndex + przycisk Add project (RBAC) + overlay tylko na kontenerze listy.
+   - 2026-01-26 - FIX: toolbar alignment jak DevicesIndex (Justify, prawa sekcja dosunięta do prawej krawędzi).
+   - 2026-01-26 - Scoring: kolumna Score (obliczana w UI jako I*U*S*D*E).
+   - 2026-01-28 - Hybrid progress UI: pasek postępu liczony z WorkPoints, Done=100%, OnHold jako chip, czytelne wartości pts i tickets.
+   - 2026-01-28 - CHANGE: usunięto wyświetlanie priorytetu.
+   - 2026-01-28 - CHANGE: ProjectsIndex: grid styling jak DevicesIndex + domyślne sortowanie po Score (desc).
+   - 2026-01-28 - CHANGE: Score formula: (impact * urgency) + scope + costOfDelay - effort.
+   - 2026-01-28 - FIX: Tickets kolumna pokazuje open/closed oraz fallback gdy total nie jest zwracany.
+   - 2026-01-28 - CHANGE: usunięto kolumnę Open.
+   - 2026-02-09 - UX: zmiana Owner -> Business Owner + kolejność kolumn jak ustalono.
+   - 2026-02-09 - FIX: Updated wyświetlane jako czas lokalny (korekta -1h przy prezentacji).
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using ITManager.Models.Projects
+@using ITManager.Services.Projects
+@using ITManager.Services.Auth
+
+@inject ProjectsService ProjectsService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+
+<MudPaper Class="pa-4" Elevation="0">
+
+    <MudStack Spacing="2">
+
+        @* Toolbar: tytuł + refresh + search + clear + advanced *@
+        <MudStack Row="true"
+                  AlignItems="AlignItems.Center"
+                  Justify="Justify.SpaceBetween"
+                  Class="w-100">
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudText Typo="Typo.h5">Projects</MudText>
+
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               Disabled="@(_loading || _saving)"
+                               OnClick="ReloadAsync" />
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudTextField T="string"
+                              Value="@_search"
+                              ValueChanged="OnSearchChangedAsync"
+                              ValueChangedDebounceInterval="300"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Placeholder="Search projects..."
+                              Immediate="true"
+                              Disabled="@(_loading || _saving)"
+                              Class="projects-search" />
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           Class="ml-2 projects-clear-btn"
+                           Disabled="@(_loading || _saving)"
+                           OnClick="ClearFilters">
+                    Clear filters
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@(_showAdvancedFilters ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           Class="ml-2"
+                           Disabled="@(_loading || _saving)"
+                           OnClick="ToggleAdvancedFilters">
+                    Advanced filters
+                </MudButton>
+            </MudStack>
+
+        </MudStack>
+
+        @* Kontener treści listy: overlay ma zasłaniać tylko ten obszar *@
+        <div class="projects-content-container">
+
+            <MudCollapse Expanded="_showAdvancedFilters">
+                <MudPaper Class="pa-3 mt-2 projects-filters-panel" Elevation="0">
+                    <MudGrid Spacing="2">
+
+                        <MudItem xs="12" sm="6" md="4" lg="3">
+                            <MudSwitch T="bool"
+                                       @bind-Checked="_onlyActive"
+                                       Color="Color.Primary"
+                                       Disabled="@(_loading || _saving)">
+                                Only active
+                            </MudSwitch>
+                        </MudItem>
+
+                        <MudItem xs="12" sm="6" md="4" lg="3">
+                            <MudSwitch T="bool"
+                                       @bind-Checked="_onlyWithOpenTickets"
+                                       Color="Color.Primary"
+                                       Disabled="@(_loading || _saving)">
+                                Only with open tickets
+                            </MudSwitch>
+                        </MudItem>
+
+                    </MudGrid>
+                </MudPaper>
+            </MudCollapse>
+
+            @* Przyciski funkcyjne *@
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           Disabled="@(_loading || _saving || !_canCreate)"
+                           OnClick="OpenCreate">
+                    Add project
+                </MudButton>
+            </MudStack>
+
+            <MudDataGrid T="ProjectListItemDto"
+                         @ref="_grid"
+                         Class="projects-grid"
+                         Items="@FilteredItems"
+                         Hover="true"
+                         Dense="true"
+                         Bordered="false"
+                         Elevation="0"
+                         Breakpoint="Breakpoint.Sm"
+                         HorizontalScrollbar="false"
+                         SortMode="SortMode.Multiple"
+                         Filterable="false"
+                         RowClassFunc="GetRowClass"
+                         RowClick="OnRowClick"
+                         @bind-RowsPerPage="_rowsPerPage">
+
+                <PagerContent>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd" Class="pa-2">
+                        <MudDataGridPager T="ProjectListItemDto" PageSizeOptions="@_rowsPerPageOptions" />
+                    </MudStack>
+                </PagerContent>
+
+                <Columns>
+                    @* Kolejność kolumn: Name, Score, Business Owner, Stage, Tickets, Deadline, Updated *@
+
+                    <PropertyColumn Property="x => x.Name"
+                                    Title="Name"
+                                    Sortable="true"
+                                    HeaderStyle="width:22%;"
+                                    CellStyle="width:22%;" />
+
+                    <TemplateColumn Title="Score"
+                                    Sortable="true"
+                                    SortBy="@(x => CalculateScore(x))"
+                                    InitialDirection="SortDirection.Descending"
+                                    HeaderStyle="width:8%;"
+                                    CellStyle="width:8%;">
+                        <CellTemplate Context="cell">
+                            <MudText Typo="Typo.body2">@CalculateScore(cell.Item)</MudText>
+                        </CellTemplate>
+                    </TemplateColumn>
+
+                    <PropertyColumn Property="x => x.OwnerDisplayName"
+                                    Title="Business Owner"
+                                    Sortable="true"
+                                    HeaderStyle="width:16%;"
+                                    CellStyle="width:16%;" />
+
+                    <TemplateColumn Title="Stage"
+                                    Sortable="true"
+                                    SortBy="@(x => (int)x.BusinessStage)"
+                                    HeaderStyle="width:12%;"
+                                    CellStyle="width:12%;">
+                        <CellTemplate Context="cell">
+                            @{
+                                var st = cell.Item.BusinessStage;
+                                var label = string.IsNullOrWhiteSpace(cell.Item.BusinessStageName) ? cell.Item.ProjectStatusName : cell.Item.BusinessStageName;
+                                var isHold = st == ProjectBusinessStage.OnHold;
+                                var isDone = st == ProjectBusinessStage.Done;
+                            }
+
+                            <MudChip Size="Size.Small"
+                                     Variant="Variant.Filled"
+                                     Color="@(isDone? Color.Success: isHold? Color.Warning: Color.Default)">
+                                @label
+                            </MudChip>
+                        </CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Title="Tickets"
+                                    Sortable="true"
+                                    SortBy="@(x => (x.WorkPointsTotal > 0 ? (double)x.WorkPointsDone / x.WorkPointsTotal : 0d))"
+                                    HeaderStyle="width:20%;"
+                                    CellStyle="width:20%;">
+                        <CellTemplate Context="cell">
+                            @{
+                                var it = cell.Item;
+
+                                var wpDone = Math.Max(0, it.WorkPointsDone);
+                                var wpTotal = Math.Max(0, it.WorkPointsTotal);
+
+                                var open = Math.Max(0, it.OpenTicketsCount);
+                                var total = Math.Max(0, it.TicketsTotalCount);
+
+                                if (total == 0 && open > 0)
+                                    total = open;
+
+                                var closed = total > 0 ? Math.Max(0, total - open) : 0;
+                            }
+
+                            <MudStack Spacing="0">
+                                <MudText Typo="Typo.body2">
+                                    @wpDone / @wpTotal pts
+                                </MudText>
+
+                                <MudText Typo="Typo.caption">
+                                    @open open / @closed closed
+                                </MudText>
+                            </MudStack>
+                        </CellTemplate>
+                    </TemplateColumn>
+
+                    <PropertyColumn Property="x => x.DeadlineDate"
+                                    Title="Deadline"
+                                    Sortable="true"
+                                    HeaderStyle="width:10%;"
+                                    CellStyle="width:10%;" />
+
+                    <TemplateColumn Title="Updated"
+                                    Sortable="true"
+                                    SortBy="@(x => x.UpdatedAtUtc)"
+                                    HeaderStyle="width:12%;"
+                                    CellStyle="width:12%;">
+                        <CellTemplate Context="cell">
+                            <MudText Typo="Typo.body2">@FormatUpdatedLocal(cell.Item.UpdatedAtUtc)</MudText>
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="px-2 py-2">
+                        No records
+                    </MudText>
+                </NoRecordsContent>
+
+            </MudDataGrid>
+
+            <MudOverlay Visible="@(_loading || _saving)"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Absolute="true"
+                        Class="projects-overlay">
+                <MudPaper Class="pa-6 projects-overlay-card">
+                    <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                        <MudText Typo="Typo.subtitle1">
+                            @(_saving ? "Saving..." : "Loading...")
+                        </MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudOverlay>
+
+        </div>
+
+    </MudStack>
+
+</MudPaper>
+
+<style>
+    .projects-row {
+        min-height: 44px;
+    }
+
+        .projects-row td,
+        .projects-row .mud-table-cell {
+            vertical-align: middle;
+        }
+
+        .projects-row:hover {
+            background-color: rgba(2, 136, 209, 0.12);
+        }
+
+    .projects-row-clickable {
+        cursor: pointer;
+    }
+
+    .projects-search {
+        min-width: 400px;
+    }
+
+    .projects-clear-btn {
+        border-width: 1px;
+    }
+
+    .projects-filters-panel {
+        border-radius: 8px;
+    }
+
+    .projects-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .projects-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .projects-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    /* Standard dopasowania kolumn jak DevicesIndex */
+    .projects-grid table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .projects-grid th,
+    .projects-grid td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code {
+    private const string PermProjectsCreate = "Projects.Create";
+
+    private bool _loading;
+    private bool _saving;
+
+    private bool _canCreate;
+
+    private string _search = string.Empty;
+    private bool _showAdvancedFilters;
+
+    private bool _onlyActive = true;
+    private bool _onlyWithOpenTickets;
+
+    private List<ProjectListItemDto> _items = new();
+
+    private int _rowsPerPage = 100;
+    private int[] _rowsPerPageOptions = new[] { 50, 100, 200, 500, 1000 };
+
+    private MudDataGrid<ProjectListItemDto>? _grid;
+
+    private IEnumerable<ProjectListItemDto> FilteredItems => BuildFilteredItems();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUserContextService.EnsureInitializedAsync();
+        _canCreate = CurrentUserContextService.Can(PermProjectsCreate);
+
+        await ReloadAsync();
+    }
+
+    private void ToggleAdvancedFilters()
+        => _showAdvancedFilters = !_showAdvancedFilters;
+
+    private Task OnSearchChangedAsync(string value)
+    {
+        _search = value ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private void ClearFilters()
+    {
+        _search = string.Empty;
+        _onlyActive = true;
+        _onlyWithOpenTickets = false;
+    }
+
+    private IEnumerable<ProjectListItemDto> BuildFilteredItems()
+    {
+        IEnumerable<ProjectListItemDto> q = _items ?? new List<ProjectListItemDto>();
+
+        if (_onlyActive)
+            q = q.Where(x => x.IsActive);
+
+        if (_onlyWithOpenTickets)
+            q = q.Where(x => x.OpenTicketsCount > 0);
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            q = q.Where(x =>
+                (x.Name ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (x.OwnerDisplayName ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (x.ProjectStatusName ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (x.BusinessStageName ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        q = q.OrderByDescending(x => CalculateScore(x))
+             .ThenBy(x => x.DeadlineDate ?? DateTime.MaxValue)
+             .ThenByDescending(x => x.UpdatedAtUtc);
+
+        return q.ToList();
+    }
+
+    // Score = (impact * urgency) + scope + costOfDelay - effort
+    private static int CalculateScore(ProjectListItemDto it)
+    {
+        if (it == null)
+            return 0;
+
+        var impact = SanitizeFactor(it.Impact);
+        var urgency = SanitizeFactor(it.Urgency);
+        var scope = SanitizeFactor(it.Scope);
+        var costOfDelay = SanitizeFactor(it.CostOfDelay);
+        var effort = SanitizeFactor(it.Effort);
+
+        checked
+        {
+            return (impact * urgency) + scope + costOfDelay - effort;
+        }
+    }
+
+    private static int SanitizeFactor(int value)
+    {
+        if (value < 0) return 0;
+        return value;
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_saving)
+            return;
+
+        try
+        {
+            _loading = true;
+            _items = await ProjectsService.GetProjectsAsync() ?? new List<ProjectListItemDto>();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            _items = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenCreate()
+    {
+        if (!_canCreate)
+        {
+            Snackbar.Add("Brak uprawnień.", Severity.Warning);
+            return;
+        }
+
+        Navigation.NavigateTo("/projects/0");
+    }
+
+    private string GetRowClass(ProjectListItemDto row, int rowNumber)
+    {
+        _ = row;
+        _ = rowNumber;
+        return "projects-row projects-row-clickable";
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<ProjectListItemDto> args)
+    {
+        if (args?.Item == null)
+            return;
+
+        Navigation.NavigateTo($"/projects/{args.Item.Id}");
+    }
+
+    private static string FormatUpdatedLocal(DateTime utcValue)
+    {
+        if (utcValue == default)
+            return string.Empty;
+
+        try
+        {
+            // Korekta: dane są w UTC, a użytkownik oczekuje czasu lokalnego.
+            // To rozwiązuje typowy efekt "-1h" dla CET w zimie, gdy UI pokazuje surowy UTC.
+            var local = DateTime.SpecifyKind(utcValue, DateTimeKind.Utc).ToLocalTime();
+            return local.ToString("yyyy-MM-dd HH:mm");
+        }
+        catch
+        {
+            return utcValue.ToString("yyyy-MM-dd HH:mm");
+        }
+    }
+}
