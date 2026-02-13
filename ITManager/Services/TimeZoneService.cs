@@ -1,8 +1,8 @@
 ﻿// File: Services/TimeZoneService.cs
 // Description: Konwersje czasu UTC -> strefa użytkownika na podstawie dbo.users.PreferredTimeZoneId.
-// Version: 1.01
+// Version: 1.02
 // Created: 2026-01-24
-// Updated: 2026-01-27 - CHANGE: fallback zawsze do UTC (nie Local), aby zachować spójność na serwerach.
+// Updated: 2026-02-12 - UX: dodane FormatUtcForUser (bez sync call do DB) na potrzeby gridów.
 
 using System;
 using System.Collections.Generic;
@@ -81,6 +81,25 @@ namespace ITManager.Services
         public void InvalidateCache()
         {
             _cachedTz = null;
+        }
+
+        public bool HasCachedTimeZone => _cachedTz != null;
+
+        public string FormatUtcForUser(DateTime utc, string format = "yyyy-MM-dd HH:mm")
+        {
+            // Celowo bez blokowania async, formatowanie działa po wcześniejszym załadowaniu cache.
+            // Gdy cache nie jest dostępny, pokazujemy UTC, aby uniknąć sync-IO.
+
+            var safeUtc = utc;
+            if (safeUtc.Kind != DateTimeKind.Utc)
+                safeUtc = DateTime.SpecifyKind(safeUtc, DateTimeKind.Utc);
+
+            var tz = _cachedTz;
+            if (tz == null)
+                return safeUtc.ToString(format);
+
+            var local = TimeZoneInfo.ConvertTimeFromUtc(safeUtc, tz);
+            return local.ToString(format);
         }
 
         private static string ResolveTimeZoneId(string id)

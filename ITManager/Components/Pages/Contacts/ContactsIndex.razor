@@ -39,6 +39,8 @@
      - Overlay CSS: absolute + inset jak inne ekrany
    Updated: 2026-02-03 - wersja 1.33:
      - DisplayName format: "Nazwisko, Imię" zamiast "Imię Nazwisko"
+   Updated: 2026-02-12 - wersja 1.34:
+     - UX: email link uses default text color (inherit) instead of primary color
 *@
 
 @using System
@@ -187,8 +189,8 @@
                         <TemplateColumn Title="@L["ColDisplayName"]"
                                         Sortable="true"
                                         SortBy="@(x => BuildDisplayName(x))"
-                                        HeaderStyle="width:13%;"
-                                        CellStyle="width:13%;">
+                                        HeaderStyle="width:15%;"
+                                        CellStyle="width:15%;">
                             <CellTemplate Context="ctx">
                                 @BuildDisplayName(ctx.Item)
                             </CellTemplate>
@@ -203,8 +205,8 @@
                         <PropertyColumn Property="@(x => x.Stanowisko)"
                                         Title="@L["ColPosition"]"
                                         Sortable="true"
-                                        HeaderStyle="width:24%;"
-                                        CellStyle="width:24%;" />
+                                        HeaderStyle="width:22%;"
+                                        CellStyle="width:22%;" />
 
                         <PropertyColumn Property="@(x => x.Wewnetrzny)"
                                         Title="@L["ColInternal"]"
@@ -239,7 +241,7 @@
                                 @if (!string.IsNullOrWhiteSpace(ctx.Item.Email))
                                 {
                                     <a href="mailto:@ctx.Item.Email"
-                                       style="color: var(--mud-palette-primary); text-decoration:none;">
+                                       style="color: inherit; text-decoration: none;">
                                         @ctx.Item.Email
                                     </a>
                                 }

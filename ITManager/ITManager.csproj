@@ -13,8 +13,31 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <Content Remove="Components\Pages\Assets\Devices\__DeviceEditDialog.razor" />
+		<Content Remove="Components\Pages\Assets\Devices\__DeviceEditDialog.razor" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <EmbeddedResource Remove="Components\Pages\Reports\GlovesReport.pl-PL.resx" />
+	  <EmbeddedResource Remove="Components\Pages\Reports\GlovesReport.resx" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Content Include="Components\Pages\Reports\GlovesReport.pl-PL.resx" />
+	  <Content Include="Components\Pages\Reports\GlovesReport.resx" />
+	</ItemGroup>
+
+	<!-- USUŃ CAŁKOWICIE te dwa bloki (były błędne dla lokalizacji) -->
+	<!--
+  <ItemGroup>
+    <EmbeddedResource Remove="Components\Pages\Notifications\NotificationsIndex.pl-PL.resx" />
+    <EmbeddedResource Remove="Components\Pages\Notifications\NotificationsIndex.resx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Components\Pages\Notifications\NotificationsIndex.pl-PL.resx" />
+    <Content Include="Components\Pages\Notifications\NotificationsIndex.resx" />
+  </ItemGroup>
+  -->
 
 	<!-- ========================= -->
 	<!-- NuGet packages -->
@@ -52,6 +75,8 @@
 
 		<EmbeddedResource Update="Components\Layout\AppNavMenu.resx" />
 		<EmbeddedResource Update="Components\Layout\AppNavMenu.pl-PL.resx" />
+
+		<!-- Notifications -->
 
 		<!-- Assets -->
 		<EmbeddedResource Update="Components\Pages\Assets\Agreements\Agreements.resx" />

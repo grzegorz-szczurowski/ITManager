@@ -12,6 +12,7 @@
 @using MudBlazor
 @using ITManager.Services
 @using ITManager.Services.Auth
+@using ITManager.Services.Notifications
 
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
@@ -21,6 +22,7 @@
 @inject ILogger<MainLayout> Logger
 @inject ContactsService ContactsService
 @inject TicketsService TicketsService
+@inject NotificationsService NotificationsService
 @inject NavigationManager Navigation
 @inject CurrentUserContextService CurrentUserContextService
 @inject IStringLocalizer<MainLayout> L
@@ -39,7 +41,10 @@
    Updated: 2026-02-06 - UX: AppBar notification badge dla nowych ticketów (queue New, unassigned).
    Updated: 2026-02-06 - UX polish: badge widoczny stabilnie (bez skakania), Color.Error, lepszy tooltip (0 vs >0), stały odstęp.
    Updated: 2026-02-06 - UX: ujednolicenie tooltipów w AppBarze (spójny styl jak "New tickets").
-   Version: 1.20 *@
+   Updated: 2026-02-11 - wersja 1.21:
+     - InApp notifications: dzwonek + badge z liczbą nieprzeczytanych, klik przenosi na /notifications.
+     - FIX: poprawione zamknięcia tagów w bloku NoAccess.
+   Version: 1.21 *@
 
 <MudThemeProvider Theme="@_theme" IsDarkMode="@_isDarkMode" />
 <MudDialogProvider />
@@ -72,7 +77,6 @@ else
     else
     {
         <MudLayout>
-
             <MudDrawerContainer>
 
                 <MudDrawer Anchor="Anchor.Start"
@@ -111,9 +115,9 @@ else
 
                         <MudSpacer />
 
-                        @* New tickets badge: widoczne tylko dla Tickets.Edit.Assigned / Tickets.Edit.All *@
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="th-appbar-actions">
 
+                            @* New tickets badge: widoczne tylko dla Tickets.Edit.Assigned / Tickets.Edit.All *@
                             @if (_canSeeNewTicketsBadge)
                             {
                                 <MudTooltip Placement="Placement.Bottom" Text="@NewTicketsTooltipText" ShowArrow="true">
@@ -123,10 +127,29 @@ else
                                                   Visible="@(_newTicketsQueueCount > 0)"
                                                   Content="@NewTicketsBadgeContent"
                                                   Color="Color.Error">
-                                            <MudIconButton Icon="@Icons.Material.Filled.ConfirmationNumber"
+                                            <MudIconButton Icon="@Icons.Material.Filled.SupportAgent"
                                                            Color="Color.Primary"
                                                            AriaLabel="@NewTicketsAriaLabel"
                                                            OnClick="NavigateToTicketsQueue" />
+                                        </MudBadge>
+                                    </div>
+                                </MudTooltip>
+                            }
+
+                            @* In-app notifications bell *@
+                            @if (_hasAccess)
+                            {
+                                <MudTooltip Placement="Placement.Bottom" Text="@InAppNotificationsTooltipText" ShowArrow="true">
+                                    <div class="th-badge-slot">
+                                        <MudBadge Overlap="true"
+                                                  Origin="Origin.TopRight"
+                                                  Visible="@(_unreadNotificationsCount > 0)"
+                                                  Content="@UnreadNotificationsBadgeContent"
+                                                  Color="Color.Error">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Notifications"
+                                                           Color="Color.Primary"
+                                                           AriaLabel="@InAppNotificationsAriaLabel"
+                                                           OnClick="NavigateToNotifications" />
                                         </MudBadge>
                                     </div>
                                 </MudTooltip>
@@ -191,7 +214,6 @@ else
                 </MudMainContent>
 
             </MudDrawerContainer>
-
         </MudLayout>
     }
 }
@@ -225,8 +247,13 @@ else
     private bool _canSeeNewTicketsBadge = false;
     private int _newTicketsQueueCount = 0;
 
+    private int _unreadNotificationsCount = 0;
+
     private CancellationTokenSource? _newTicketsCts;
     private Task? _newTicketsLoopTask;
+
+    private CancellationTokenSource? _notificationsCts;
+    private Task? _notificationsLoopTask;
 
     protected override void OnInitialized()
     {
@@ -275,6 +302,9 @@ else
                     await RefreshNewTicketsQueueCountAsync();
                     StartNewTicketsBadgeLoop();
                 }
+
+                await RefreshUnreadNotificationsCountAsync();
+                StartUnreadNotificationsLoop();
             }
         }
         catch (Exception ex)
@@ -328,6 +358,44 @@ else
         }
     }
 
+    private async Task RefreshUnreadNotificationsCountAsync()
+    {
+        if (!_hasAccess)
+        {
+            if (_unreadNotificationsCount != 0)
+            {
+                _unreadNotificationsCount = 0;
+                await InvokeAsync(StateHasChanged);
+            }
+            return;
+        }
+
+        try
+        {
+            var count = await NotificationsService.GetUnreadCountForCurrentUserAsync().ConfigureAwait(false);
+
+            if (count < 0)
+                count = 0;
+
+            if (count != _unreadNotificationsCount)
+            {
+                _unreadNotificationsCount = count;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            if (_unreadNotificationsCount != 0)
+                _unreadNotificationsCount = 0;
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "[MainLayout] Nie udało się pobrać liczby nieprzeczytanych powiadomień.");
+        }
+    }
+
     private void StartNewTicketsBadgeLoop()
     {
         if (_newTicketsCts != null)
@@ -357,6 +425,35 @@ else
         }, token);
     }
 
+    private void StartUnreadNotificationsLoop()
+    {
+        if (_notificationsCts != null)
+            return;
+
+        _notificationsCts = new CancellationTokenSource();
+        var token = _notificationsCts.Token;
+
+        _notificationsLoopTask = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+
+                if (token.IsCancellationRequested)
+                    break;
+
+                await RefreshUnreadNotificationsCountAsync();
+            }
+        }, token);
+    }
+
     public async ValueTask DisposeAsync()
     {
         try
@@ -368,10 +465,23 @@ else
                 _newTicketsCts = null;
             }
 
+            if (_notificationsCts != null)
+            {
+                _notificationsCts.Cancel();
+                _notificationsCts.Dispose();
+                _notificationsCts = null;
+            }
+
             if (_newTicketsLoopTask != null)
             {
                 try { await _newTicketsLoopTask; } catch { }
                 _newTicketsLoopTask = null;
+            }
+
+            if (_notificationsLoopTask != null)
+            {
+                try { await _notificationsLoopTask; } catch { }
+                _notificationsLoopTask = null;
             }
         }
         catch
@@ -382,6 +492,11 @@ else
     private void NavigateToTicketsQueue()
     {
         Navigation.NavigateTo("/tickets/queue");
+    }
+
+    private void NavigateToNotifications()
+    {
+        Navigation.NavigateTo("/notifications");
     }
 
     private async Task RestoreDrawerStateOnFirstEntryAsync()
@@ -613,6 +728,53 @@ else
             {
             }
             return fallback;
+        }
+    }
+
+    private string InAppNotificationsTooltipText
+    {
+        get
+        {
+            var baseText = "Notifications";
+            try
+            {
+                var localized = L["Notifications.Tooltip"];
+                if (!string.Equals(localized.Value, "Notifications.Tooltip", StringComparison.Ordinal))
+                    baseText = localized.Value;
+            }
+            catch
+            {
+            }
+
+            if (_unreadNotificationsCount <= 0)
+                return $"{baseText}: 0";
+
+            return $"{baseText}: {_unreadNotificationsCount}";
+        }
+    }
+
+    private string InAppNotificationsAriaLabel
+    {
+        get
+        {
+            if (_unreadNotificationsCount <= 0)
+                return "Notifications. No unread notifications.";
+
+            return $"Notifications. {_unreadNotificationsCount} unread notifications.";
+        }
+    }
+
+    private string UnreadNotificationsBadgeContent
+    {
+        get
+        {
+            if (_unreadNotificationsCount <= 0)
+                return string.Empty;
+
+            if (_unreadNotificationsCount >= 100)
+                return "99+";
+
+            return _unreadNotificationsCount.ToString(CultureInfo.InvariantCulture);
         }
     }
 

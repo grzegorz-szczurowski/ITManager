@@ -1,0 +1,56 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Powiadomienia</value>
+  </data>
+	<data name="Refresh" xml:space="preserve">
+    <value>Odśwież</value>
+  </data>
+	<data name="MarkAllRead" xml:space="preserve">
+    <value>Oznacz wszystkie jako przeczytane</value>
+  </data>
+
+	<data name="TicketNumber" xml:space="preserve">
+    <value>Numer</value>
+  </data>
+	<data name="TicketTitle" xml:space="preserve">
+    <value>Tytuł</value>
+  </data>
+	<data name="EventType" xml:space="preserve">
+    <value>Typ zdarzenia</value>
+  </data>
+	<data name="CreatedAt" xml:space="preserve">
+    <value>Data</value>
+  </data>
+
+	<data name="Empty" xml:space="preserve">
+    <value>Brak powiadomień</value>
+  </data>
+
+	<data name="LoadError" xml:space="preserve">
+    <value>Nie udało się wczytać powiadomień</value>
+  </data>
+	<data name="ActionError" xml:space="preserve">
+    <value>Nie udało się wykonać akcji</value>
+  </data>
+
+	<data name="Event_TicketPublicCreated" xml:space="preserve">
+    <value>Zdarzenie publiczne</value>
+  </data>
+	<data name="Event_TicketPublicCommentAdded" xml:space="preserve">
+    <value>Komentarz publiczny</value>
+  </data>
+</root>

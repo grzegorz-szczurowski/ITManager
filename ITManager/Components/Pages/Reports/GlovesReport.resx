@@ -1,0 +1,142 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+		<xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+		<xsd:element name="root" msdata:IsDataSet="true">
+			<xsd:complexType>
+				<xsd:choice maxOccurs="unbounded">
+					<xsd:element name="metadata">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" />
+							</xsd:sequence>
+							<xsd:attribute name="name" use="required" type="xsd:string" />
+							<xsd:attribute name="type" type="xsd:string" />
+							<xsd:attribute name="mimetype" type="xsd:string" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="assembly">
+						<xsd:complexType>
+							<xsd:attribute name="alias" type="xsd:string" />
+							<xsd:attribute name="name" type="xsd:string" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="data">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+								<xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+							<xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+							<xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+							<xsd:attribute ref="xml:space" />
+						</xsd:complexType>
+					</xsd:element>
+					<xsd:element name="resheader">
+						<xsd:complexType>
+							<xsd:sequence>
+								<xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+							</xsd:sequence>
+							<xsd:attribute name="name" type="xsd:string" use="required" />
+						</xsd:complexType>
+					</xsd:element>
+				</xsd:choice>
+			</xsd:complexType>
+		</xsd:element>
+	</xsd:schema>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve"><value>Gloves consumption report</value></data>
+	<data name="Subtitle" xml:space="preserve"><value>TEMREX vending usage, manager view</value></data>
+	<data name="Refresh" xml:space="preserve"><value>Refresh</value></data>
+	<data name="Loading" xml:space="preserve"><value>Loading data</value></data>
+	<data name="ErrorReport" xml:space="preserve"><value>Could not load the report.</value></data>
+	<data name="NoAccess" xml:space="preserve"><value>No access. Required permission: {0}</value></data>
+
+	<data name="FiltersPanelTitle" xml:space="preserve"><value>Filters</value></data>
+	<data name="FiltersSummary" xml:space="preserve"><value>Date: {0}. Department: {1}. Items: {2}. Machines: {3}.</value></data>
+
+	<data name="From" xml:space="preserve"><value>From</value></data>
+	<data name="To" xml:space="preserve"><value>To</value></data>
+
+	<data name="Presets" xml:space="preserve"><value>Presets</value></data>
+	<data name="Preset_30d" xml:space="preserve"><value>30d</value></data>
+	<data name="Preset_90d" xml:space="preserve"><value>90d</value></data>
+	<data name="Preset_180d" xml:space="preserve"><value>180d</value></data>
+	<data name="Preset_365d" xml:space="preserve"><value>365d</value></data>
+	<data name="ResetFilters" xml:space="preserve"><value>Reset</value></data>
+
+	<data name="Department" xml:space="preserve"><value>Department</value></data>
+	<data name="AllDepartments" xml:space="preserve"><value>All departments</value></data>
+	<data name="AllDepartmentsShort" xml:space="preserve"><value>All</value></data>
+	<data name="ActiveDepartment" xml:space="preserve"><value>Department: {0}</value></data>
+
+	<data name="TrendGranularity" xml:space="preserve"><value>Trend granularity</value></data>
+	<data name="Trend_Week" xml:space="preserve"><value>Weekly</value></data>
+	<data name="Trend_Month" xml:space="preserve"><value>Monthly</value></data>
+
+	<data name="CompareLabel" xml:space="preserve"><value>Compare with previous period</value></data>
+	<data name="ComparePeriods" xml:space="preserve"><value>Current: {0} to {1}. Previous: {2} to {3}.</value></data>
+	<data name="CompareChangesTitle" xml:space="preserve"><value>What changed vs previous period</value></data>
+	<data name="Compare_TotalQty" xml:space="preserve"><value>Total quantity</value></data>
+	<data name="Compare_AvgPerDay" xml:space="preserve"><value>Average per day</value></data>
+	<data name="Compare_Transactions" xml:space="preserve"><value>Transactions</value></data>
+	<data name="Compare_UniqueUsers" xml:space="preserve"><value>Unique users</value></data>
+
+	<data name="GlovesTypes" xml:space="preserve"><value>Items (SKU)</value></data>
+	<data name="AllItems" xml:space="preserve"><value>All items</value></data>
+	<data name="AllItemsShort" xml:space="preserve"><value>All</value></data>
+	<data name="VendingMachines" xml:space="preserve"><value>Vending machines</value></data>
+	<data name="AllMachines" xml:space="preserve"><value>All machines</value></data>
+	<data name="AllMachinesShort" xml:space="preserve"><value>All</value></data>
+	<data name="SelectedCount" xml:space="preserve"><value>{0} selected</value></data>
+
+	<data name="NoDataForFilters" xml:space="preserve"><value>No data for selected filters.</value></data>
+
+	<data name="Kpi_TotalQty" xml:space="preserve"><value>Total quantity</value></data>
+	<data name="Kpi_AvgPerDay" xml:space="preserve"><value>Avg per day: {0}</value></data>
+	<data name="Kpi_Transactions" xml:space="preserve"><value>Transactions</value></data>
+	<data name="Kpi_UniqueUsers" xml:space="preserve"><value>Unique users</value></data>
+	<data name="Kpi_TopDepartment" xml:space="preserve"><value>Top department</value></data>
+	<data name="TopDepartmentDetails" xml:space="preserve"><value>{0} pcs, {1} users</value></data>
+
+	<data name="TrendTitle" xml:space="preserve"><value>Trend</value></data>
+	<data name="NoTrend" xml:space="preserve"><value>No trend data in the selected period.</value></data>
+	<data name="Series_Qty" xml:space="preserve"><value>Quantity</value></data>
+	<data name="DrillDownHint" xml:space="preserve"><value>Drill-down: {0}</value></data>
+
+	<data name="TopDepartmentsTitle" xml:space="preserve"><value>Department ranking</value></data>
+	<data name="TopDepartmentsHint" xml:space="preserve"><value>Click a department to drill down</value></data>
+
+	<data name="TopUsersTitle" xml:space="preserve"><value>Top users</value></data>
+	<data name="TopGloveTypesTitle" xml:space="preserve"><value>Top glove types (no sizes)</value></data>
+	<data name="TopGloveTypesHint" xml:space="preserve"><value>Aggregated from item descriptions, sizes removed</value></data>
+	<data name="TopVmsTitle" xml:space="preserve"><value>Top machines</value></data>
+
+	<data name="Col_UserName" xml:space="preserve"><value>User</value></data>
+	<data name="Col_CardNumber" xml:space="preserve"><value>Card</value></data>
+	<data name="Col_Department" xml:space="preserve"><value>Department</value></data>
+	<data name="Col_Qty" xml:space="preserve"><value>Qty</value></data>
+	<data name="Col_AvgPerDay" xml:space="preserve"><value>Avg/day</value></data>
+	<data name="Col_Transactions" xml:space="preserve"><value>Transactions</value></data>
+	<data name="Col_UniqueUsers" xml:space="preserve"><value>Users</value></data>
+	<data name="Col_GloveType" xml:space="preserve"><value>Glove type</value></data>
+	<data name="Col_Vm" xml:space="preserve"><value>Machine</value></data>
+
+	<data name="NA" xml:space="preserve"><value>N/A</value></data>
+	<data name="ChangeFromZero" xml:space="preserve"><value>new</value></data>
+	<data name="ChangeNo" xml:space="preserve"><value>no change</value></data>
+</root>

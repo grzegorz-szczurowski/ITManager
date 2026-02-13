@@ -6,8 +6,8 @@
 //              - TicketEventsRepository: outbox zdarzeń (atomicznie w transakcjach komend)
 // Notes:
 //   - Temat maili pomijamy w całości.
-// Version: 2.23
-// Updated: 2026-02-09
+// Version: 2.25
+// Updated: 2026-02-11
 // Change log:
 //   - 2.20 (2026-02-08) MIGRATION: stabilne DTO w TicketsService (CreateTicketRequest, Impact/Urgency, TicketActionRow)
 //                                 + spięcie Query/Command end-to-end (bez zależności Razor -> wewnętrzne typy serwisów).
@@ -15,11 +15,12 @@
 //                            + TicketEventsRepository tworzony bez connection stringa (zgodnie z projektem).
 //   - 2.22 (2026-02-08) NO-OP: porządek i zgodność sygnatur (bez zmian funkcjonalnych).
 //   - 2.23 (2026-02-09) FEATURE: GetTicketByCodeAsync dla linków /tickets/{TicketCode} (np. WAL000001).
+//   - 2.24 (2026-02-11) REFACTOR: konstruktor DI-friendly (można wstrzyknąć gotowe serwisy Query/Command),
+//                                 lepsza walidacja i stała nazwa connection stringa.
+//   - 2.25 (2026-02-11) FIX: usunięty konstruktor legacy (IConfiguration, CurrentUserContextService) aby DI miało jednoznaczną ścieżkę tworzenia.
 
 using ITManager.Models;
-using ITManager.Services.Auth;
 using ITManager.Services.Tickets;
-using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -87,22 +88,21 @@ namespace ITManager.Services
         private readonly TicketsQueryService _query;
         private readonly TicketsCommandService _command;
 
+        /// <summary>
+        /// Jedyny konstruktor. TicketsService jest czystą fasadą, bez tworzenia zależności ręcznie.
+        /// Connection string i repo eventów są rozwiązywane przez DI w Program.cs.
+        /// </summary>
         public TicketsService(
-            IConfiguration configuration,
-            CurrentUserContextService currentUserContextService)
+            TicketsQueryService query,
+            TicketsCommandService command)
         {
-            if (configuration == null) throw new ArgumentNullException(nameof(configuration));
-            if (currentUserContextService == null) throw new ArgumentNullException(nameof(currentUserContextService));
-
-            var cs = configuration.GetConnectionString("ITManagerConnection")
-                     ?? throw new InvalidOperationException("Brak connection stringa ITManagerConnection");
-
-            // W projekcie TicketEventsRepository nie ma konstruktora z connection stringiem.
-            var eventsRepo = new TicketEventsRepository();
-
-            _query = new TicketsQueryService(cs, currentUserContextService);
-            _command = new TicketsCommandService(cs, currentUserContextService, eventsRepo);
+            _query = query ?? throw new ArgumentNullException(nameof(query));
+            _command = command ?? throw new ArgumentNullException(nameof(command));
         }
+
+        /* =========================
+           Public API dla UI
+        ========================= */
 
         // Dictionaries
         public Task<ImpactUrgencyDictionaryResult> GetImpactAndUrgencyDictionaryAsync()
@@ -180,10 +180,21 @@ namespace ITManager.Services
         public Task<TicketActionRow?> GetTicketActionByIdAsync(long actionId)
             => _query.GetTicketActionByIdAsync(actionId);
 
-        public Task<long> AddTicketActionAsync(long ticketId, string actionText, bool isPublic, string? targetStatusName, string? waitingReasonCode)
+        public Task<long> AddTicketActionAsync(
+            long ticketId,
+            string actionText,
+            bool isPublic,
+            string? targetStatusName,
+            string? waitingReasonCode)
             => _command.AddTicketActionAsync(ticketId, actionText, isPublic, targetStatusName, waitingReasonCode);
 
-        public Task<long> UpdateTicketActionAsync(long ticketId, long actionId, string actionText, bool isPublic, string? targetStatusName, string? waitingReasonCode)
+        public Task<long> UpdateTicketActionAsync(
+            long ticketId,
+            long actionId,
+            string actionText,
+            bool isPublic,
+            string? targetStatusName,
+            string? waitingReasonCode)
             => _command.UpdateTicketActionAsync(ticketId, actionId, actionText, isPublic, targetStatusName, waitingReasonCode);
     }
 }

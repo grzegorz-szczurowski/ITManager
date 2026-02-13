@@ -1,0 +1,56 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+	<resheader name="resmimetype">
+		<value>text/microsoft-resx</value>
+	</resheader>
+	<resheader name="version">
+		<value>2.0</value>
+	</resheader>
+	<resheader name="reader">
+		<value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+	<resheader name="writer">
+		<value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+	</resheader>
+
+	<data name="Title" xml:space="preserve">
+    <value>Notifications</value>
+  </data>
+	<data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+	<data name="MarkAllRead" xml:space="preserve">
+    <value>Mark all as read</value>
+  </data>
+
+	<data name="TicketNumber" xml:space="preserve">
+    <value>Ticket number</value>
+  </data>
+	<data name="TicketTitle" xml:space="preserve">
+    <value>Ticket title</value>
+  </data>
+	<data name="EventType" xml:space="preserve">
+    <value>Event type</value>
+  </data>
+	<data name="CreatedAt" xml:space="preserve">
+    <value>Created</value>
+  </data>
+
+	<data name="Empty" xml:space="preserve">
+    <value>Empty</value>
+  </data>
+
+	<data name="LoadError" xml:space="preserve">
+    <value>Failed to load notifications</value>
+  </data>
+	<data name="ActionError" xml:space="preserve">
+    <value>Action failed</value>
+  </data>
+
+	<data name="Event_TicketPublicCreated" xml:space="preserve">
+    <value>Public event</value>
+  </data>
+	<data name="Event_TicketPublicCommentAdded" xml:space="preserve">
+    <value>Public comment</value>
+  </data>
+</root>

@@ -1,0 +1,1170 @@
+﻿@namespace ITManager.Components.Pages.Reports
+@page "/reports/gloves"
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Reports.View")]
+
+@* File: Components/Pages/Reports/GlovesReport.razor
+   Description: Raport pobrań rękawic (TEMREX) - widok managerski.
+                Cele:
+                - Kto i ile zużywa (osoba, dział)
+                - Jaki typ rękawic (bez rozmiarów)
+                - Konfigurowalne filtry, ale czytelne
+                - Porównanie okresów: pokazuj "co się zmieniło" wprost
+                - Drill-down: klik w Department ustawia filtr bez przeładowania strony
+   Version: 1.10
+   Created: 2026-02-11
+   Updated: 2026-02-12
+   Change log:
+     - 1.03 (2026-02-12) Trend chart na pełną szerokość.
+     - 1.10 (2026-02-12) MANAGER VIEW: ranking działów + ByItemType bez rozmiarów + filtry panel + compare deltas + drill-down Department.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Localization
+@using Microsoft.Extensions.Logging
+@using ITManager.Models.Reports
+@using ITManager.Services.Auth
+@using ITManager.Services.Reports
+
+@implements IAsyncDisposable
+
+@inject GlovesReportService GlovesReportService
+@inject ISnackbar Snackbar
+@inject CurrentUserContextService CurrentUserContextService
+@inject IStringLocalizer<GlovesReport> L
+@inject TimeZoneService TimeZoneService
+@inject ILogger<GlovesReport> Logger
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="2">
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h5">@L["Title"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Primary">@L["Subtitle"]</MudText>
+            </MudStack>
+
+            <MudTooltip Text="@L["Refresh"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Size="Size.Medium"
+                               Variant="Variant.Text"
+                               Class="ml-1"
+                               OnClick="ReloadAsync"
+                               Disabled="@(_loading || !_canView)" />
+            </MudTooltip>
+        </MudStack>
+
+        @if (!_ready)
+        {
+            <MudProgressCircular Size="Size.Large" Class="mx-auto" />
+        }
+        else if (!_canView)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled">
+                @L["NoAccess", "Reports.View"] <b>Reports.View</b>
+            </MudAlert>
+        }
+        else
+        {
+            <div class="gloves-content-container">
+
+                @* Filtry: czytelne, zwijane, z presetami *@
+                <MudExpansionPanels Class="mt-1" Elevation="0" MultiExpansion="false">
+                    <MudExpansionPanel Text="@L["FiltersPanelTitle"]" Expanded="false">
+                        <MudPaper Class="pa-3" Outlined="true">
+                            <MudStack Spacing="2">
+                                <MudGrid Spacing="2">
+
+                                    <MudItem xs="12" md="12">
+                                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["FiltersSummary", GetDateRangeLabel(), GetDepartmentLabel(), GetItemsLabel(), GetMachinesLabel()]</MudText>
+                                        </MudStack>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudDatePicker Label="@L["From"]"
+                                                       Date="_dateFrom"
+                                                       DateChanged="OnDateFromChanged"
+                                                       DateFormat="yyyy-MM-dd"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Disabled="@_loading" />
+
+                                        <MudSlider T="double"
+                                                   Min="0"
+                                                   Max="@_sliderMaxDays"
+                                                   Step="1"
+                                                   Value="_sliderFromDays"
+                                                   ValueChanged="OnSliderFromChanged"
+                                                   Immediate="true"
+                                                   Disabled="@_loading" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudDatePicker Label="@L["To"]"
+                                                       Date="_dateTo"
+                                                       DateChanged="OnDateToChanged"
+                                                       DateFormat="yyyy-MM-dd"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Disabled="@_loading" />
+
+                                        <MudSlider T="double"
+                                                   Min="0"
+                                                   Max="@_sliderMaxDays"
+                                                   Step="1"
+                                                   Value="_sliderToDays"
+                                                   ValueChanged="OnSliderToChanged"
+                                                   Immediate="true"
+                                                   Disabled="@_loading" />
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="12">
+                                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Presets"]</MudText>
+
+                                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_loading" OnClick="@(async () => await ApplyPresetDaysAsync(30))">@L["Preset_30d"]</MudButton>
+                                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_loading" OnClick="@(async () => await ApplyPresetDaysAsync(90))">@L["Preset_90d"]</MudButton>
+                                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_loading" OnClick="@(async () => await ApplyPresetDaysAsync(180))">@L["Preset_180d"]</MudButton>
+                                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_loading" OnClick="@(async () => await ApplyPresetDaysAsync(365))">@L["Preset_365d"]</MudButton>
+
+                                            <MudSpacer />
+
+                                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_loading" OnClick="ResetFiltersAsync">
+                                                <MudIcon Icon="@Icons.Material.Filled.RestartAlt" Class="me-1" />
+                                                @L["ResetFilters"]
+                                            </MudButton>
+                                        </MudStack>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudAutocomplete T="GlovesDepartmentOption"
+                                                         Label="@L["Department"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Dense="true"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         SearchFunc="SearchDepartmentsAsync"
+                                                         ToStringFunc="@(x => x is null ? "" : x.Department)"
+                                                         Value="null"
+                                                         ValueChanged="OnDepartmentPicked"
+                                                         Disabled="@(_loading || _departments.Count == 0)"
+                                                         Clearable="true" />
+
+                                        <MudStack Spacing="1" Class="mt-1">
+                                            @if (string.IsNullOrWhiteSpace(_selectedDepartment))
+                                            {
+                                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small">
+                                                    @L["AllDepartments"]
+                                                </MudChip>
+                                            }
+                                            else
+                                            {
+                                                <MudChip T="string"
+                                                         Variant="Variant.Outlined"
+                                                         Color="Color.Primary"
+                                                         Size="Size.Small"
+                                                         Closeable="true"
+                                                         OnClose="ClearDepartmentAsync">
+                                                    @L["ActiveDepartment", _selectedDepartment]
+                                                </MudChip>
+                                            }
+                                        </MudStack>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudSelect T="GlovesTrendGranularity"
+                                                   Label="@L["TrendGranularity"]"
+                                                   Variant="Variant.Outlined"
+                                                   Margin="Margin.Dense"
+                                                   Value="_trendGranularity"
+                                                   ValueChanged="OnTrendGranularityChanged"
+                                                   Disabled="@_loading">
+                                            <MudSelectItem Value="GlovesTrendGranularity.Week">@L["Trend_Week"]</MudSelectItem>
+                                            <MudSelectItem Value="GlovesTrendGranularity.Month">@L["Trend_Month"]</MudSelectItem>
+                                        </MudSelect>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudCheckBox T="bool"
+                                                     Value="_compare"
+                                                     ValueChanged="OnCompareValueChanged"
+                                                     Label="@L["CompareLabel"]"
+                                                     Disabled="@_loading" />
+
+                                        @if (_compare)
+                                        {
+                                            var p = GetComparePeriods();
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                                @L["ComparePeriods", p.CurrentFrom.ToString("yyyy-MM-dd"), p.CurrentTo.ToString("yyyy-MM-dd"), p.PrevFrom.ToString("yyyy-MM-dd"), p.PrevTo.ToString("yyyy-MM-dd")]
+                                            </MudText>
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudAutocomplete T="GlovesItemOption"
+                                                         Label="@L["GlovesTypes"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Dense="true"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         SearchFunc="SearchItemsAsync"
+                                                         ToStringFunc="@(x => x is null ? "" : $"{x.ItemNumber}  {x.ItemDescr}")"
+                                                         Value="null"
+                                                         ValueChanged="OnItemPicked"
+                                                         Disabled="@(_loading || _items.Count == 0)"
+                                                         Clearable="true" />
+
+                                        <MudStack Spacing="1" Class="mt-1">
+                                            @if (_selectedItemNumbers.Count == 0)
+                                            {
+                                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small">
+                                                    @L["AllItems"]
+                                                </MudChip>
+                                            }
+                                            else
+                                            {
+                                                foreach (var it in _selectedItemNumbers.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                                                {
+                                                    <MudChip T="string"
+                                                             Variant="Variant.Outlined"
+                                                             Color="Color.Primary"
+                                                             Size="Size.Small"
+                                                             OnClose="@(async () => await RemoveItemAsync(it))"
+                                                             Closeable="true">
+                                                        @it
+                                                    </MudChip>
+                                                }
+                                            }
+                                        </MudStack>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="6">
+                                        <MudAutocomplete T="GlovesVmOption"
+                                                         Label="@L["VendingMachines"]"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Dense="true"
+                                                         CoerceText="true"
+                                                         ResetValueOnEmptyText="true"
+                                                         SearchFunc="SearchVmsAsync"
+                                                         ToStringFunc="@(x => x is null ? "" : $"{x.VmId}  {x.VmDescr}")"
+                                                         Value="null"
+                                                         ValueChanged="OnVmPicked"
+                                                         Disabled="@(_loading || _vms.Count == 0)"
+                                                         Clearable="true" />
+
+                                        <MudStack Spacing="1" Class="mt-1">
+                                            @if (_selectedVmIds.Count == 0)
+                                            {
+                                                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small">
+                                                    @L["AllMachines"]
+                                                </MudChip>
+                                            }
+                                            else
+                                            {
+                                                foreach (var id in _selectedVmIds.OrderBy(x => x))
+                                                {
+                                                    <MudChip T="string"
+                                                             Variant="Variant.Outlined"
+                                                             Color="Color.Primary"
+                                                             Size="Size.Small"
+                                                             OnClose="@(async () => await RemoveVmAsync(id))"
+                                                             Closeable="true">
+                                                        @id
+                                                    </MudChip>
+                                                }
+                                            }
+                                        </MudStack>
+                                    </MudItem>
+
+                                </MudGrid>
+                            </MudStack>
+                        </MudPaper>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+
+                @if (_loading && _result is null)
+                {
+                    <MudStack Spacing="2" AlignItems="AlignItems.Center" Class="pa-4">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Medium" />
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Loading"]</MudText>
+                    </MudStack>
+                }
+                else if (_result is null)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-2">
+                        @L["NoDataForFilters"]
+                    </MudAlert>
+                }
+                else
+                {
+                    var k = _result.Kpis;
+
+                    @* Sekcja 1: KPI *@
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_TotalQty"]</MudText>
+                                    @if (_compare)
+                                    {
+                                        var ch = GetChangeChip(k.TotalQty, k.PrevTotalQty);
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@ch.Color" Size="Size.Small">
+                                            <MudIcon Icon="@ch.Icon" Size="Size.Small" Class="me-1" />
+                                            @ch.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+                                <MudText Typo="Typo.h4">@k.TotalQty</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Kpi_AvgPerDay", k.AvgQtyPerDay]</MudText>
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_Transactions"]</MudText>
+                                    @if (_compare)
+                                    {
+                                        var ch = GetChangeChip(k.TransactionsCount, k.PrevTransactionsCount);
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@ch.Color" Size="Size.Small">
+                                            <MudIcon Icon="@ch.Icon" Size="Size.Small" Class="me-1" />
+                                            @ch.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+                                <MudText Typo="Typo.h4">@k.TransactionsCount</MudText>
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudStack Direction="Row" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                                    <MudText Typo="Typo.subtitle2">@L["Kpi_UniqueUsers"]</MudText>
+                                    @if (_compare)
+                                    {
+                                        var ch = GetChangeChip(k.UniqueUsersCount, k.PrevUniqueUsersCount);
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="@ch.Color" Size="Size.Small">
+                                            <MudIcon Icon="@ch.Icon" Size="Size.Small" Class="me-1" />
+                                            @ch.Label
+                                        </MudChip>
+                                    }
+                                </MudStack>
+                                <MudText Typo="Typo.h4">@k.UniqueUsersCount</MudText>
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudText Typo="Typo.subtitle2">@L["Kpi_TopDepartment"]</MudText>
+                                <MudText Typo="Typo.h6">@GetTopDepartmentLabel()</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@GetTopDepartmentDetails()</MudText>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+
+                    @* Porównanie: "co się zmieniło" wprost *@
+                    @if (_compare)
+                    {
+                        <MudPaper Class="pa-3 mt-2" Outlined="true">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">@L["CompareChangesTitle"]</MudText>
+
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" md="3">
+                                        <MudText Typo="Typo.body2">@L["Compare_TotalQty"]</MudText>
+                                        <MudText Typo="Typo.h6">@GetChangeText(k.TotalQty, k.PrevTotalQty)</MudText>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="3">
+                                        <MudText Typo="Typo.body2">@L["Compare_AvgPerDay"]</MudText>
+                                        <MudText Typo="Typo.h6">@GetChangeText(k.AvgQtyPerDay, k.PrevAvgQtyPerDay)</MudText>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="3">
+                                        <MudText Typo="Typo.body2">@L["Compare_Transactions"]</MudText>
+                                        <MudText Typo="Typo.h6">@GetChangeText(k.TransactionsCount, k.PrevTransactionsCount)</MudText>
+                                    </MudItem>
+
+                                    <MudItem xs="12" md="3">
+                                        <MudText Typo="Typo.body2">@L["Compare_UniqueUsers"]</MudText>
+                                        <MudText Typo="Typo.h6">@GetChangeText(k.UniqueUsersCount, k.PrevUniqueUsersCount)</MudText>
+                                    </MudItem>
+                                </MudGrid>
+                            </MudStack>
+                        </MudPaper>
+                    }
+
+                    @* Sekcja 2: Trend full width *@
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" md="12">
+                            <MudPaper Class="pa-3 gloves-trend" Outlined="true">
+                                <MudStack Spacing="1">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                        <MudText Typo="Typo.subtitle2">@L["TrendTitle"]</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(_selectedDepartment))
+                                        {
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["DrillDownHint", _selectedDepartment]</MudText>
+                                        }
+                                    </MudStack>
+
+                                    @if (_result.Trend.Count == 0)
+                                    {
+                                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["NoTrend"]</MudAlert>
+                                    }
+                                    else
+                                    {
+                                        <MudChart ChartType="ChartType.Line"
+                                                  XAxisLabels="TrendLabels"
+                                                  ChartSeries="TrendSeries"
+                                                  Width="100%"
+                                                  Height="240px"
+                                                  Class="w-100" />
+                                    }
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+
+                    @* Sekcja 3: dwa bloki obok siebie (manager view) *@
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle2">@L["TopDepartmentsTitle"]</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">@L["TopDepartmentsHint"]</MudText>
+
+                                    <MudTable T="GlovesByDepartmentRow"
+                                              Items="_result.ByDepartment"
+                                              Dense="true"
+                                              Hover="true"
+                                              Bordered="true"
+                                              Striped="true"
+                                              Class="gloves-table gloves-clickable"
+                                              OnRowClick="@(async (TableRowClickEventArgs<GlovesByDepartmentRow> args) => await OnDepartmentRowClickedAsync(args))">
+                                        <HeaderContent>
+                                            <MudTh>@L["Col_Department"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Qty"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_Transactions"]</MudTh>
+                                            <MudTh class="text-right">@L["Col_UniqueUsers"]</MudTh>
+                                        </HeaderContent>
+                                        <RowTemplate>
+                                            <MudTd>
+                                                <MudText Typo="Typo.body2" Style="font-weight:700;">@context.Department</MudText>
+                                            </MudTd>
+                                            <MudTd class="text-right">@context.Qty</MudTd>
+                                            <MudTd class="text-right">@context.Transactions</MudTd>
+                                            <MudTd class="text-right">@context.UniqueUsers</MudTd>
+                                        </RowTemplate>
+                                    </MudTable>
+
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudText Typo="Typo.subtitle2">@L["TopUsersTitle"]</MudText>
+
+                                <MudTable Items="_result.ByUser"
+                                          Dense="true"
+                                          Hover="true"
+                                          Bordered="true"
+                                          Striped="true"
+                                          Class="gloves-table">
+                                    <HeaderContent>
+                                        <MudTh>@L["Col_UserName"]</MudTh>
+                                        <MudTh>@L["Col_Department"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Qty"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_AvgPerDay"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Transactions"]</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>
+                                            <MudText Typo="Typo.body2" Style="font-weight:700;">@context.UserName</MudText>
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">@context.CardNumber</MudText>
+                                        </MudTd>
+                                        <MudTd>@context.Department</MudTd>
+                                        <MudTd class="text-right">@context.Qty</MudTd>
+                                        <MudTd class="text-right">@GetAvgPerDay(context.Qty)</MudTd>
+                                        <MudTd class="text-right">@context.Transactions</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+
+                    @* Reszta: typy bez rozmiarów + maszyny *@
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudText Typo="Typo.subtitle2">@L["TopGloveTypesTitle"]</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["TopGloveTypesHint"]</MudText>
+
+                                <MudTable Items="_result.ByItemType"
+                                          Dense="true"
+                                          Hover="true"
+                                          Bordered="true"
+                                          Striped="true"
+                                          Class="gloves-table">
+                                    <HeaderContent>
+                                        <MudTh>@L["Col_GloveType"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Qty"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Transactions"]</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>
+                                            <MudText Typo="Typo.body2" Style="font-weight:700;">@context.GloveType</MudText>
+                                        </MudTd>
+                                        <MudTd class="text-right">@context.Qty</MudTd>
+                                        <MudTd class="text-right">@context.Transactions</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            </MudPaper>
+                        </MudItem>
+
+                        <MudItem xs="12" md="6">
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudText Typo="Typo.subtitle2">@L["TopVmsTitle"]</MudText>
+
+                                <MudTable Items="_result.ByVm"
+                                          Dense="true"
+                                          Hover="true"
+                                          Bordered="true"
+                                          Striped="true"
+                                          Class="gloves-table">
+                                    <HeaderContent>
+                                        <MudTh>@L["Col_Vm"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Qty"]</MudTh>
+                                        <MudTh class="text-right">@L["Col_Transactions"]</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>
+                                            <MudText Typo="Typo.body2" Style="font-weight:700;">@context.VmId</MudText>
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">@context.VmDescr</MudText>
+                                        </MudTd>
+                                        <MudTd class="text-right">@context.Qty</MudTd>
+                                        <MudTd class="text-right">@context.Transactions</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+                }
+
+                <MudOverlay Visible="@_loading"
+                            DarkBackground="true"
+                            AutoClose="false"
+                            Absolute="true"
+                            Class="gloves-overlay">
+                    <MudPaper Class="pa-6 gloves-overlay-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                            <MudText Typo="Typo.subtitle1">@L["Loading"]</MudText>
+                        </MudStack>
+                    </MudPaper>
+                </MudOverlay>
+
+            </div>
+        }
+    </MudStack>
+</MudPaper>
+
+<style>
+    .gloves-content-container {
+        position: relative;
+        min-height: 320px;
+    }
+
+    .gloves-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .gloves-overlay-card {
+        border-radius: 12px;
+        min-width: 260px;
+    }
+
+    .gloves-trend {
+        width: 100%;
+    }
+
+    .gloves-table table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .gloves-table th,
+    .gloves-table td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+
+@code
+{
+    private bool _ready;
+    private bool _canView;
+    private bool _loading;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+
+    private DateTime _sliderBaseStart;
+    private double _sliderMaxDays;
+    private double _sliderFromDays;
+    private double _sliderToDays;
+
+    private bool _compare;
+
+    private GlovesTrendGranularity _trendGranularity = GlovesTrendGranularity.Week;
+
+    private TimeZoneInfo _userTz = TimeZoneInfo.Local;
+
+    private List<GlovesItemOption> _items = new();
+    private List<GlovesVmOption> _vms = new();
+    private List<GlovesDepartmentOption> _departments = new();
+
+    private HashSet<string> _selectedItemNumbers = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<int> _selectedVmIds = new();
+
+    private string? _selectedDepartment;
+
+    private GlovesReportResult? _result;
+
+    private CancellationTokenSource? _reloadDebounceCts;
+    private bool _reloadRequestedWhileLoading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        try
+        {
+            await CurrentUserContextService.EnsureInitializedAsync();
+            var ctx = CurrentUserContextService.CurrentUser;
+
+            _canView = ctx.IsAuthenticated && ctx.IsActive == true && ctx.Has("Reports.View");
+            _ready = true;
+
+            if (!_canView)
+                return;
+
+            try
+            {
+                _userTz = await TimeZoneService.GetUserTimeZoneAsync();
+            }
+            catch
+            {
+                _userTz = TimeZoneInfo.Local;
+            }
+
+            var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+            _sliderBaseStart = todayLocal.AddMonths(-12);
+            _sliderMaxDays = Math.Max(1, (todayLocal - _sliderBaseStart).TotalDays);
+
+            _dateFrom = todayLocal.AddDays(-30);
+            _dateTo = todayLocal;
+
+            SyncSlidersFromDates();
+
+            _items = await GlovesReportService.GetAvailableItemsAsync();
+            _vms = await GlovesReportService.GetAvailableVendingMachinesAsync();
+            _departments = await GlovesReportService.GetAvailableDepartmentsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Reports.Gloves] Init error.");
+            Snackbar.Add(L["ErrorReport"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (_canView)
+            await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_canView)
+            return;
+
+        if (_loading)
+        {
+            _reloadRequestedWhileLoading = true;
+            return;
+        }
+
+        try
+        {
+            _loading = true;
+
+            var from = (_dateFrom?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date.AddDays(-30));
+            var to = (_dateTo?.Date ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date);
+
+            if (to < from)
+                (from, to) = (to, from);
+
+            var req = new GlovesReportRequest
+            {
+                DateFrom = from,
+                DateTo = to,
+                CompareWithPreviousPeriod = _compare,
+                TrendGranularity = _trendGranularity,
+                Department = string.IsNullOrWhiteSpace(_selectedDepartment) ? null : _selectedDepartment,
+                ItemNumbers = _selectedItemNumbers.Count == 0 ? new List<string>() : _selectedItemNumbers.ToList(),
+                VmIds = _selectedVmIds.Count == 0 ? new List<int>() : _selectedVmIds.ToList()
+            };
+
+            _result = await GlovesReportService.GetReportAsync(req);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "[Reports.Gloves] Reload error. From={From} To={To} Dept={Dept} ItemsCount={ItemsCount} VmCount={VmCount} Compare={Compare} Granularity={Granularity}",
+                _dateFrom, _dateTo, _selectedDepartment, _selectedItemNumbers.Count, _selectedVmIds.Count, _compare, _trendGranularity);
+
+            Snackbar.Add(L["ErrorReport"], Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+
+            if (_reloadRequestedWhileLoading)
+            {
+                _reloadRequestedWhileLoading = false;
+                await ReloadAsync();
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ScheduleReloadAsync(int delayMs = 450)
+    {
+        _reloadDebounceCts?.Cancel();
+        _reloadDebounceCts?.Dispose();
+
+        _reloadDebounceCts = new CancellationTokenSource();
+        var token = _reloadDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(delayMs, token);
+            if (!token.IsCancellationRequested)
+                await InvokeAsync(ReloadAsync);
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task ApplyPresetDaysAsync(int days)
+    {
+        NormalizeDates();
+
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+        _dateTo = todayLocal;
+        _dateFrom = todayLocal.AddDays(-Math.Max(1, days));
+
+        SyncSlidersFromDates();
+        await ReloadAsync();
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+        _dateFrom = todayLocal.AddDays(-30);
+        _dateTo = todayLocal;
+
+        _trendGranularity = GlovesTrendGranularity.Week;
+        _compare = false;
+
+        _selectedDepartment = null;
+        _selectedItemNumbers.Clear();
+        _selectedVmIds.Clear();
+
+        SyncSlidersFromDates();
+        await ReloadAsync();
+    }
+
+    private async Task OnDateFromChanged(DateTime? value)
+    {
+        _dateFrom = value;
+        NormalizeDates();
+        SyncSlidersFromDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnDateToChanged(DateTime? value)
+    {
+        _dateTo = value;
+        NormalizeDates();
+        SyncSlidersFromDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnSliderFromChanged(double value)
+    {
+        _sliderFromDays = value;
+
+        if (_sliderFromDays > _sliderToDays)
+            _sliderToDays = _sliderFromDays;
+
+        _dateFrom = _sliderBaseStart.AddDays(_sliderFromDays).Date;
+        _dateTo = _sliderBaseStart.AddDays(_sliderToDays).Date;
+
+        NormalizeDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnSliderToChanged(double value)
+    {
+        _sliderToDays = value;
+
+        if (_sliderToDays < _sliderFromDays)
+            _sliderFromDays = _sliderToDays;
+
+        _dateFrom = _sliderBaseStart.AddDays(_sliderFromDays).Date;
+        _dateTo = _sliderBaseStart.AddDays(_sliderToDays).Date;
+
+        NormalizeDates();
+        await ScheduleReloadAsync();
+    }
+
+    private async Task OnCompareValueChanged(bool value)
+    {
+        if (_compare == value)
+            return;
+
+        _compare = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnTrendGranularityChanged(GlovesTrendGranularity value)
+    {
+        if (_trendGranularity == value)
+            return;
+
+        _trendGranularity = value;
+        await ReloadAsync();
+    }
+
+    private void NormalizeDates()
+    {
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _userTz).Date;
+
+        var from = (_dateFrom?.Date ?? todayLocal.AddDays(-30));
+        var to = (_dateTo?.Date ?? todayLocal);
+
+        if (to < from)
+            (from, to) = (to, from);
+
+        _dateFrom = from;
+        _dateTo = to;
+    }
+
+    private void SyncSlidersFromDates()
+    {
+        NormalizeDates();
+
+        var from = _dateFrom!.Value.Date;
+        var to = _dateTo!.Value.Date;
+
+        var start = (from - _sliderBaseStart).TotalDays;
+        var end = (to - _sliderBaseStart).TotalDays;
+
+        start = Math.Max(0, Math.Min(_sliderMaxDays, start));
+        end = Math.Max(0, Math.Min(_sliderMaxDays, end));
+
+        _sliderFromDays = start;
+        _sliderToDays = end;
+    }
+
+    private async Task<IEnumerable<GlovesDepartmentOption>> SearchDepartmentsAsync(string value, CancellationToken token)
+    {
+        await Task.CompletedTask;
+
+        if (_departments.Count == 0)
+            return Enumerable.Empty<GlovesDepartmentOption>();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return _departments.Take(50);
+
+        value = value.Trim();
+
+        return _departments
+            .Where(x => (x.Department?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Take(50);
+    }
+
+    private async Task OnDepartmentPicked(GlovesDepartmentOption? dept)
+    {
+        if (dept is null || string.IsNullOrWhiteSpace(dept.Department))
+            return;
+
+        _selectedDepartment = dept.Department.Trim();
+        await ReloadAsync();
+    }
+
+    private async Task ClearDepartmentAsync()
+    {
+        _selectedDepartment = null;
+        await ReloadAsync();
+    }
+
+    private async Task<IEnumerable<GlovesItemOption>> SearchItemsAsync(string value, CancellationToken token)
+    {
+        await Task.CompletedTask;
+
+        if (_items.Count == 0)
+            return Enumerable.Empty<GlovesItemOption>();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return _items.Take(50);
+
+        value = value.Trim();
+
+        return _items
+            .Where(x => (x.ItemNumber?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false)
+                     || (x.ItemDescr?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Take(50);
+    }
+
+    private async Task<IEnumerable<GlovesVmOption>> SearchVmsAsync(string value, CancellationToken token)
+    {
+        await Task.CompletedTask;
+
+        if (_vms.Count == 0)
+            return Enumerable.Empty<GlovesVmOption>();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return _vms.Take(50);
+
+        value = value.Trim();
+
+        return _vms
+            .Where(x => x.VmId.ToString().Contains(value, StringComparison.OrdinalIgnoreCase)
+                     || (x.VmDescr?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Take(50);
+    }
+
+    private async Task OnItemPicked(GlovesItemOption? item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.ItemNumber))
+            return;
+
+        _selectedItemNumbers.Add(item.ItemNumber);
+        await ScheduleReloadAsync(250);
+    }
+
+    private async Task RemoveItemAsync(string itemNumber)
+    {
+        if (string.IsNullOrWhiteSpace(itemNumber))
+            return;
+
+        _selectedItemNumbers.Remove(itemNumber);
+        await ScheduleReloadAsync(250);
+    }
+
+    private async Task OnVmPicked(GlovesVmOption? vm)
+    {
+        if (vm is null || vm.VmId <= 0)
+            return;
+
+        _selectedVmIds.Add(vm.VmId);
+        await ScheduleReloadAsync(250);
+    }
+
+    private async Task RemoveVmAsync(int vmId)
+    {
+        if (vmId <= 0)
+            return;
+
+        _selectedVmIds.Remove(vmId);
+        await ScheduleReloadAsync(250);
+    }
+
+    private async Task OnDepartmentRowClickedAsync(TableRowClickEventArgs<GlovesByDepartmentRow> args)
+    {
+        if (args.Item is null)
+            return;
+
+        var dept = args.Item.Department ?? "";
+        if (string.IsNullOrWhiteSpace(dept))
+            return;
+
+        _selectedDepartment = dept.Trim();
+
+        await ReloadAsync();
+    }
+
+
+    private string[] TrendLabels
+        => _result?.Trend?.OrderBy(x => x.SortKey).Select(x => x.Label).ToArray() ?? Array.Empty<string>();
+
+    private List<ChartSeries> TrendSeries
+    {
+        get
+        {
+            if (_result?.Trend is null || _result.Trend.Count == 0)
+                return new List<ChartSeries>();
+
+            var points = _result.Trend.OrderBy(x => x.SortKey).Select(x => (double)x.Qty).ToArray();
+
+            return new List<ChartSeries>
+            {
+                new ChartSeries { Name = L["Series_Qty"], Data = points }
+            };
+        }
+    }
+
+    private decimal GetAvgPerDay(int qty)
+    {
+        NormalizeDates();
+        var days = Math.Max(1, (_dateTo!.Value.Date - _dateFrom!.Value.Date).Days + 1);
+        return Math.Round((decimal)qty / days, 2);
+    }
+
+    private string GetTopDepartmentLabel()
+    {
+        var top = _result?.ByDepartment?.FirstOrDefault();
+        if (top is null)
+            return L["NA"];
+
+        return top.Department;
+    }
+
+    private string GetTopDepartmentDetails()
+    {
+        var top = _result?.ByDepartment?.FirstOrDefault();
+        if (top is null)
+            return "";
+
+        return L["TopDepartmentDetails", top.Qty, top.UniqueUsers];
+    }
+
+    private ChangeChip GetChangeChip(int current, int prev)
+    {
+        if (prev == 0 && current == 0)
+            return new ChangeChip(Icons.Material.Filled.Remove, Color.Primary, "0");
+
+        if (prev == 0 && current > 0)
+            return new ChangeChip(Icons.Material.Filled.ArrowUpward, Color.Error, L["ChangeFromZero"]);
+
+        var diff = current - prev;
+        if (diff == 0)
+            return new ChangeChip(Icons.Material.Filled.Remove, Color.Primary, L["ChangeNo"]);
+
+        var pct = (double)diff / prev * 100.0;
+        var label = $"{diff:+#;-#;0} ({pct:+0.#;-0.#;0.#}%)";
+
+        if (diff > 0)
+            return new ChangeChip(Icons.Material.Filled.ArrowUpward, Color.Error, label);
+
+        return new ChangeChip(Icons.Material.Filled.ArrowDownward, Color.Success, label);
+    }
+
+    private string GetChangeText(int current, int prev)
+    {
+        if (prev == 0 && current == 0)
+            return "0";
+
+        if (prev == 0 && current > 0)
+            return $"{current} ( {L["ChangeFromZero"]} )";
+
+        var diff = current - prev;
+        if (diff == 0)
+            return L["ChangeNo"];
+
+        var pct = (double)diff / prev * 100.0;
+        return $"{diff:+#;-#;0} ({pct:+0.#;-0.#;0.#}%)";
+    }
+
+    private string GetChangeText(decimal current, decimal prev)
+    {
+        if (prev == 0 && current == 0)
+            return "0";
+
+        if (prev == 0 && current > 0)
+            return $"{current:0.##} ( {L["ChangeFromZero"]} )";
+
+        var diff = current - prev;
+        if (diff == 0)
+            return L["ChangeNo"];
+
+        var pct = (double)(diff / prev) * 100.0;
+        return $"{diff:+0.##;-0.##;0.##} ({pct:+0.#;-0.#;0.#}%)";
+    }
+
+    private ComparePeriods GetComparePeriods()
+    {
+        NormalizeDates();
+
+        var currentFrom = _dateFrom!.Value.Date;
+        var currentTo = _dateTo!.Value.Date;
+
+        var days = (currentTo - currentFrom).Days + 1;
+
+        var prevTo = currentFrom.AddDays(-1);
+        var prevFrom = prevTo.AddDays(-(days - 1));
+
+        return new ComparePeriods(currentFrom, currentTo, prevFrom, prevTo);
+    }
+
+    private string GetDateRangeLabel()
+    {
+        NormalizeDates();
+        return $"{_dateFrom!.Value:yyyy-MM-dd} - {_dateTo!.Value:yyyy-MM-dd}";
+    }
+
+    private string GetDepartmentLabel()
+        => string.IsNullOrWhiteSpace(_selectedDepartment) ? L["AllDepartmentsShort"] : _selectedDepartment!;
+
+    private string GetItemsLabel()
+        => _selectedItemNumbers.Count == 0 ? L["AllItemsShort"] : L["SelectedCount", _selectedItemNumbers.Count];
+
+    private string GetMachinesLabel()
+        => _selectedVmIds.Count == 0 ? L["AllMachinesShort"] : L["SelectedCount", _selectedVmIds.Count];
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_reloadDebounceCts is not null)
+            {
+                _reloadDebounceCts.Cancel();
+                _reloadDebounceCts.Dispose();
+            }
+        }
+        catch
+        {
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private sealed record ComparePeriods(DateTime CurrentFrom, DateTime CurrentTo, DateTime PrevFrom, DateTime PrevTo);
+    private sealed record ChangeChip(string Icon, Color Color, string Label);
+}

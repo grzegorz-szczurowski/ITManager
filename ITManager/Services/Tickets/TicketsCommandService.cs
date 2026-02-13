@@ -4,16 +4,18 @@
 //   - Każda metoda ma jawny check permission na starcie.
 //   - Zdarzenia (outbox) zapisujemy w tej samej transakcji co zmiana danych ticketa.
 //   - Priority jest liczone w backendzie jako jedyne źródło prawdy: impact.weight * urgency.weight.
-// Version: 1.05
-// Updated: 2026-02-09
+//   - In-app notifications (UserNotifications): tworzymy atomowo w tej samej transakcji dla publicznych zdarzeń.
+// Version: 1.09
+// Updated: 2026-02-12
 // Change log:
-//   - 1.00 (2026-02-08) MIGRATION: implementacja end-to-end (ADO.NET) + zapis outbox eventów.
-//   - 1.01 (2026-02-08) FIX: dopasowanie do TicketEventsRepository.InsertEventAsync + TicketEventType
-//                            oraz pobieranie ByDisplayName z dbo.users.
-//   - 1.02 (2026-02-08) FIX: AssignToMe ustawia status "Assigned" (jeśli istnieje) zamiast zostawiać "New".
-//   - 1.03 (2026-02-08) RBAC: usunięte Tickets.Assign.Team oraz Tickets.Edit.Team.
-//   - 1.04 (2026-02-08) FIX: Edit.Assigned może przypisać ticket do siebie także gdy ticket nie ma keepera
-//                            + auto-status New -> Assigned przy pierwszym przypisaniu keepera.
+//   - 1.09 (2026-02-12) FIX: dopasowanie do schematu dbo.UserNotifications:
+//                            - EventType tinyint zamiast TypeCode nvarchar
+//                            - brak TicketNumber/TicketTitle (UI pobiera przez join do vw_tickets)
+//                            - TicketEventId NOT NULL ustawiane na ID z dbo.TicketEvents.
+//   - 1.08 (2026-02-11) FIX: próba dopasowania INSERT do dbo.UserNotifications (TypeCode nvarchar) - wycofane, bo kolumny nie istnieją w DB.
+//   - 1.07 (2026-02-11) FEATURE: tworzenie rekordów dbo.UserNotifications dla publicznych zdarzeń
+//                               (ticket created + public action added) dla requester/keeper (bez autora).
+//   - 1.06 (2026-02-11) FIX: ticket_created_by_user_id oraz ticket_created_at ustawiane na aktualnego użytkownika i czas utworzenia (nie requester).
 //   - 1.05 (2026-02-09) FIX: naliczanie priorytetu w backendzie (impact.weight * urgency.weight) dla Create i Update
 //                            + ignorowanie weightPriority z UI (source of truth w backendzie).
 
@@ -40,6 +42,11 @@ public sealed class TicketsCommandService
 
     private const int PriorityMin = 1;
     private const int PriorityMax = 120;
+
+    // EventType (tinyint) w dbo.UserNotifications
+    // Uwaga: to jest kontrakt DB. UI mapuje to przez NotificationsRepository -> TypeCode.
+    private const byte NotifEventTypeTicketPublicCreated = 1;
+    private const byte NotifEventTypeTicketPublicCommentAdded = 2;
 
     private readonly string _connectionString;
     private readonly CurrentUserContextService _ctx;
@@ -90,6 +97,7 @@ public sealed class TicketsCommandService
             var weightPriority = ComputeWeightPriority(impactWeight, urgencyWeight);
 
             var requesterId = current.UserId.Value;
+
             if (!string.IsNullOrWhiteSpace(req.RequesterDisplayName))
             {
                 var requestedRequesterId = await FindUserIdByDisplayNameAsync(conn, tx, req.RequesterDisplayName!.Trim()).ConfigureAwait(false);
@@ -115,7 +123,9 @@ public sealed class TicketsCommandService
                 closingDateUtc: null,
                 problemDescription: string.Empty,
                 problemSolution: string.Empty,
-                weightPriority: weightPriority).ConfigureAwait(false);
+                weightPriority: weightPriority,
+                createdByUserId: current.UserId.Value,
+                createdAtUtc: nowUtc).ConfigureAwait(false);
 
             await InsertTicketActionAsync(
                 conn,
@@ -131,7 +141,7 @@ public sealed class TicketsCommandService
 
             var byDisplayName = await GetUserDisplayNameByIdAsync(conn, tx, current.UserId.Value).ConfigureAwait(false);
 
-            await _events.InsertEventAsync(
+            var createdEventId = await _events.InsertEventAsync(
                 conn,
                 tx,
                 TicketEventType.Created,
@@ -140,6 +150,17 @@ public sealed class TicketsCommandService
                 byDisplayName,
                 payload: new { ImpactId = impactId, UrgencyId = urgencyId, WeightPriority = weightPriority },
                 ct: CancellationToken.None).ConfigureAwait(false);
+
+            await CreateNotificationsForTicketParticipantsAsync(
+                conn,
+                tx,
+                ticketId: ticketId,
+                requesterId: requesterId,
+                keeperId: null,
+                actorUserId: current.UserId.Value,
+                eventType: NotifEventTypeTicketPublicCreated,
+                ticketEventId: createdEventId,
+                createdAtUtc: nowUtc).ConfigureAwait(false);
 
             tx.Commit();
             return ticketId;
@@ -233,7 +254,7 @@ public sealed class TicketsCommandService
         DateTime? closingDate,
         int weightPriority)
     {
-        _ = weightPriority; // Source of truth: backend liczy priorytet na podstawie słowników.
+        _ = weightPriority;
 
         GuardCanEditTicket();
 
@@ -285,7 +306,6 @@ public sealed class TicketsCommandService
                     keeperId = requestedKeeperId.Value;
             }
 
-            // RBAC: bez Tickets.Edit.All można przypisać tylko do siebie
             if (!current.Has(PermEditAll))
             {
                 var changingKeeper = (ticket.KeeperId != keeperId);
@@ -299,7 +319,6 @@ public sealed class TicketsCommandService
                 }
             }
 
-            // Auto-status: jeśli ticket był New i dostaje keepera, to ustawiamy Assigned (jeśli istnieje).
             var statusIdFinal = statusIdRequested;
 
             var wasUnassigned = ticket.KeeperId == null || ticket.KeeperId.Value <= 0;
@@ -333,14 +352,16 @@ public sealed class TicketsCommandService
                 problemSolution: problemSolution ?? string.Empty,
                 weightPriority: computedPriority).ConfigureAwait(false);
 
-            // Jeśli to było przypisanie keepera (z null na wartość), dorzucamy akcję audytową
             if (wasUnassigned && isNowAssigned)
             {
                 var statusFromId = ticket.StatusId;
                 var nowUtc = DateTime.UtcNow;
 
-                var keeperDisplayName = keeperId == null ? string.Empty : await GetUserDisplayNameByIdAsync(conn, tx, keeperId.Value).ConfigureAwait(false);
-                var actionText = string.IsNullOrWhiteSpace(keeperDisplayName)
+                var keeperDisplayName = keeperId == null
+                    ? string.Empty
+                    : await GetUserDisplayNameByIdAsync(conn, tx, keeperId.Value).ConfigureAwait(false);
+
+                var actionText2 = string.IsNullOrWhiteSpace(keeperDisplayName)
                     ? "Assigned"
                     : $"Assigned to {keeperDisplayName}";
 
@@ -349,7 +370,7 @@ public sealed class TicketsCommandService
                     tx,
                     id,
                     createdByUserId: current.UserId.Value,
-                    actionText: actionText,
+                    actionText: actionText2,
                     isPublic: true,
                     statusFromId: statusFromId,
                     statusToId: statusIdFinal,
@@ -429,7 +450,7 @@ public sealed class TicketsCommandService
 
             var byDisplayName = await GetUserDisplayNameByIdAsync(conn, tx, current.UserId.Value).ConfigureAwait(false);
 
-            await _events.InsertEventAsync(
+            var actionEventId = await _events.InsertEventAsync(
                 conn,
                 tx,
                 TicketEventType.ActionAdded,
@@ -438,6 +459,20 @@ public sealed class TicketsCommandService
                 byDisplayName,
                 payload: new { ActionId = actionId, IsPublic = isPublic, StatusToId = statusToId, WaitingReasonCode = waitingReasonCode },
                 ct: CancellationToken.None).ConfigureAwait(false);
+
+            if (isPublic)
+            {
+                await CreateNotificationsForTicketParticipantsAsync(
+                    conn,
+                    tx,
+                    ticketId: ticketId,
+                    requesterId: ticket.RequesterId,
+                    keeperId: ticket.KeeperId,
+                    actorUserId: current.UserId.Value,
+                    eventType: NotifEventTypeTicketPublicCommentAdded,
+                    ticketEventId: actionEventId,
+                    createdAtUtc: nowUtc).ConfigureAwait(false);
+            }
 
             tx.Commit();
             return actionId;
@@ -515,6 +550,81 @@ public sealed class TicketsCommandService
             try { tx.Rollback(); } catch { }
             throw;
         }
+    }
+
+    /* =========================
+       Notifications (in-app)
+    ========================= */
+
+    private async Task CreateNotificationsForTicketParticipantsAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        long ticketId,
+        int requesterId,
+        int? keeperId,
+        int actorUserId,
+        byte eventType,
+        long ticketEventId,
+        DateTime createdAtUtc)
+    {
+        if (ticketEventId <= 0)
+            throw new InvalidOperationException("TicketEventId musi być dodatnie (dbo.UserNotifications.TicketEventId jest NOT NULL).");
+
+        // requester
+        if (requesterId > 0 && requesterId != actorUserId)
+        {
+            await InsertUserNotificationAsync(conn, tx, requesterId, ticketId, ticketEventId, eventType, createdAtUtc).ConfigureAwait(false);
+        }
+
+        // keeper
+        if (keeperId != null && keeperId.Value > 0 && keeperId.Value != requesterId && keeperId.Value != actorUserId)
+        {
+            await InsertUserNotificationAsync(conn, tx, keeperId.Value, ticketId, ticketEventId, eventType, createdAtUtc).ConfigureAwait(false);
+        }
+    }
+
+    private async Task InsertUserNotificationAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        int userId,
+        long ticketId,
+        long ticketEventId,
+        byte eventType,
+        DateTime createdAtUtc)
+    {
+        // Dopasowane do aktualnego schematu DB (wnioskowanie z błędów):
+        // UserId, TicketId, TicketEventId (NOT NULL), EventType (tinyint), IsRead, CreatedAtUtc, ReadAtUtc
+        const string sql = @"
+INSERT INTO dbo.UserNotifications
+(
+    UserId,
+    TicketId,
+    TicketEventId,
+    EventType,
+    IsRead,
+    CreatedAtUtc,
+    ReadAtUtc
+)
+VALUES
+(
+    @UserId,
+    @TicketId,
+    @TicketEventId,
+    @EventType,
+    0,
+    @CreatedAtUtc,
+    NULL
+);";
+
+        using var cmd = new SqlCommand(sql, conn, tx) { CommandType = CommandType.Text, CommandTimeout = 30 };
+
+        cmd.Parameters.Add(new SqlParameter("@UserId", SqlDbType.Int) { Value = userId });
+        cmd.Parameters.Add(new SqlParameter("@TicketId", SqlDbType.BigInt) { Value = ticketId });
+        cmd.Parameters.Add(new SqlParameter("@TicketEventId", SqlDbType.BigInt) { Value = ticketEventId });
+        cmd.Parameters.Add(new SqlParameter("@EventType", SqlDbType.TinyInt) { Value = eventType });
+        cmd.Parameters.Add(new SqlParameter("@CreatedAtUtc", SqlDbType.DateTime2) { Value = createdAtUtc });
+
+        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     /* =========================
@@ -851,7 +961,9 @@ WHERE
         DateTime? closingDateUtc,
         string problemDescription,
         string problemSolution,
-        int weightPriority)
+        int weightPriority,
+        int createdByUserId,
+        DateTime createdAtUtc)
     {
         const string sql = @"
 INSERT INTO dbo.tickets
@@ -907,8 +1019,8 @@ VALUES
         cmd.Parameters.Add(new SqlParameter("@UrgencyId", SqlDbType.BigInt) { Value = urgencyId });
         cmd.Parameters.Add(new SqlParameter("@WeightPriority", SqlDbType.Int) { Value = weightPriority });
 
-        cmd.Parameters.Add(new SqlParameter("@CreatedByUserId", SqlDbType.Int) { Value = requesterId });
-        cmd.Parameters.Add(new SqlParameter("@CreatedAtUtc", SqlDbType.DateTime2) { Value = requestDateUtc });
+        cmd.Parameters.Add(new SqlParameter("@CreatedByUserId", SqlDbType.Int) { Value = createdByUserId });
+        cmd.Parameters.Add(new SqlParameter("@CreatedAtUtc", SqlDbType.DateTime2) { Value = createdAtUtc });
 
         var raw = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
         if (raw == null || raw is DBNull)

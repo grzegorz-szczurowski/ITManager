@@ -14,8 +14,21 @@
 // Updated: 2026-01-25 - wersja 1.08 - DetailedErrors tylko w Development + DeveloperExceptionPage w Development.
 // Updated: 2026-01-30 - wersja 1.09 - FIX: ustawiony domyœlny scheme Negotiate dla Challenge (dzia³a lokalnie i pod IIS).
 // Updated: 2026-02-07 - wersja 1.10 - Tickets: rejestracja TicketsQueryService, TicketsCommandService oraz TicketEventsRepository (migracja CQRS + eventy).
-// Version: 1.10
+// Updated: 2026-02-11 - wersja 1.11 - Notifications: rejestracja NotificationsRepository i NotificationsService (in-app).
+// Updated: 2026-02-11 - wersja 1.12 - FIX: TicketEventsRepository nie przyjmuje connection stringa, poprawione komunikaty o CS.
+// Updated: 2026-02-11 - wersja 1.13 - Reports: rejestracja GlovesReportService (fix zawieszania strony /reports/gloves).
+// Version: 1.13
 
+using ITManager.Components;
+using ITManager.Models;
+using ITManager.Models.Auth;
+using ITManager.Services;
+using ITManager.Services.Auth;
+using ITManager.Services.Notifications;
+using ITManager.Services.Reports;
+using ITManager.Services.Scheduling;
+using ITManager.Services.Security;
+using ITManager.Services.Tickets;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -25,14 +38,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MudBlazor.Services;
 using QuestPDF.Infrastructure;
-using ITManager.Components;
-using ITManager.Models;
-using ITManager.Models.Auth;
-using ITManager.Services;
-using ITManager.Services.Auth;
-using ITManager.Services.Scheduling;
-using ITManager.Services.Security;
-using ITManager.Services.Tickets;
 using System;
 using System.Globalization;
 using System.Linq;
@@ -117,9 +122,36 @@ builder.Services.AddScoped<ContactUpdateService>();
 builder.Services.AddScoped<IContactsPdfService, ContactsPdfService>();
 
 // Tickets: migracja CQRS + eventy (bez ruszania Razorów)
-// UWAGA: TicketsService zostaje, bo Razory go u¿ywaj¹. Nowe serwisy bêd¹ wstrzykniête do TicketsService w kolejnych krokach.
+// UWAGA: TicketsService zostaje, bo Razory go u¿ywaj¹. Nowe serwisy s¹ wstrzykiwane do TicketsService.
+
+// TicketEventsRepository NIE ma connection stringa w konstruktorze. To repo dzia³a na istniej¹cym SqlConnection/SqlTransaction.
 builder.Services.AddScoped<TicketEventsRepository>();
+
+builder.Services.AddScoped<TicketsQueryService>(sp =>
+{
+    var cs = builder.Configuration.GetConnectionString("ITManagerConnection");
+    if (string.IsNullOrWhiteSpace(cs))
+        throw new InvalidOperationException("Brak connection stringa: ConnectionStrings:ITManagerConnection");
+
+    // Odporne na ró¿ne podpisy konstruktorów (np. (string, ctx), (string, ctx, logger), itd.)
+    return ActivatorUtilities.CreateInstance<TicketsQueryService>(sp, cs);
+});
+
+builder.Services.AddScoped<TicketsCommandService>(sp =>
+{
+    var cs = builder.Configuration.GetConnectionString("ITManagerConnection");
+    if (string.IsNullOrWhiteSpace(cs))
+        throw new InvalidOperationException("Brak connection stringa: ConnectionStrings:ITManagerConnection");
+
+    // Odporne na ró¿ne podpisy konstruktorów (u Ciebie jest (string, CurrentUserContextService, TicketEventsRepository))
+    return ActivatorUtilities.CreateInstance<TicketsCommandService>(sp, cs);
+});
+
 builder.Services.AddScoped<TicketsService>();
+
+// Notifications: in-app
+builder.Services.AddScoped<NotificationsRepository>();
+builder.Services.AddScoped<NotificationsService>();
 
 builder.Services.AddScoped<DevicesService>();
 builder.Services.AddScoped<LicensesService>();
@@ -135,7 +167,11 @@ builder.Services.AddSingleton<TicketSchedulingRepository>();
 builder.Services.AddHostedService<TicketSchedulerHostedService>();
 builder.Services.AddScoped<ScheduledTicketDefinitionsService>();
 builder.Services.AddScoped<ITManager.Services.Wms.WmsPartsRepository>();
+
+// Reports
 builder.Services.AddScoped<PrintsReportService>();
+builder.Services.AddScoped<GlovesReportService>();
+
 builder.Services.AddScoped<UserPreferencesService>();
 builder.Services.AddScoped<TimeZoneService>();
 builder.Services.AddMemoryCache();

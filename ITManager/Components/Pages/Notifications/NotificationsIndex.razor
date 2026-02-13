@@ -1,0 +1,228 @@
+﻿@page "/notifications"
+@namespace ITManager.Components.Pages.Notifications
+@rendermode InteractiveServer
+
+@attribute [Authorize(Policy = "Perm:Notifications.View")]
+
+@* File: Components/Pages/Notifications/NotificationsIndex.razor
+   Description: Lista powiadomień in-app dla aktualnego użytkownika (UserNotifications) w oparciu o MudDataGrid.
+   Version: 1.12
+   Updated: 2026-02-12
+   Change log:
+     - 1.11 (2026-02-12) UX: kolejność kolumn Type, Notifications(WALxxxxxx), Title, Created, Read + usunięta kolumna Ticket.
+     - 1.12 (2026-02-12) UX: nagłówki Ticket No., Ticket Title + Status (Read/Unread) zamiast Yes/No.
+*@
+
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using MudBlazor
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Localization
+@using ITManager.Models.Notifications
+@using ITManager.Services
+@using ITManager.Services.Notifications
+
+@inject NotificationsService NotificationsService
+@inject ISnackbar Snackbar
+@inject NavigationManager NavigationManager
+@inject IStringLocalizer<NotificationsIndex> L
+@inject TimeZoneService TimeZoneService
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudText Typo="Typo.h5">@L["Notifications"]</MudText>
+
+            <MudStack Row="true" Spacing="1">
+                <MudButton Variant="Variant.Outlined"
+                           Disabled="@(_loading || _rows.Count == 0 || _rows.All(x => x.IsRead))"
+                           OnClick="MarkAllAsReadAsync">
+                    @L["MarkAllAsRead"]
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Disabled="@_loading"
+                           OnClick="ReloadAsync">
+                    @L["Reload"]
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudDataGrid T="NotificationRow"
+                     Items="_rows"
+                     Dense="true"
+                     Hover="true"
+                     Bordered="true"
+                     Striped="true"
+                     Loading="_loading"
+                     Elevation="0"
+                     RowClick="OnRowClick">
+
+            <Columns>
+                @* 1) Type *@
+                <PropertyColumn Property="x => x.TypeCode"
+                                Title="@L["Type"]"
+                                Sortable="true">
+                    <CellTemplate>
+                        @MapTypeCodeToLabel(context.Item.TypeCode)
+                    </CellTemplate>
+                </PropertyColumn>
+
+                @* 2) Ticket No. (WALxxxxxx) *@
+                <PropertyColumn Property="x => x.TicketNumber"
+                                Title="Ticket No."
+                                Sortable="true">
+                    <CellTemplate>
+                        <MudText>@GetNotificationCode(context.Item)</MudText>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                @* 3) Ticket Title *@
+                <PropertyColumn Property="x => x.TicketTitle"
+                                Title="Ticket Title"
+                                Sortable="false">
+                    <CellTemplate>
+                        <MudText>@(context.Item.TicketTitle ?? string.Empty)</MudText>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                @* 4) Created *@
+                <PropertyColumn Property="x => x.CreatedAtUtc"
+                                Title="@L["Created"]"
+                                Sortable="true">
+                    <CellTemplate>
+                        @FormatUtcAsUserLocal(context.Item.CreatedAtUtc)
+                    </CellTemplate>
+                </PropertyColumn>
+
+                @* 5) Status (Read/Unread) *@
+                <PropertyColumn Property="x => x.IsRead"
+                                Title="Status"
+                                Sortable="true">
+                    <CellTemplate>
+                        @if (context.Item.IsRead)
+                        {
+                            <MudChip Size="Size.Small" Variant="Variant.Outlined">Read</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip Size="Size.Small" Color="Color.Warning">Unread</MudChip>
+                        }
+                    </CellTemplate>
+                </PropertyColumn>
+            </Columns>
+
+            <NoRecordsContent>
+                <MudText>@L["NoNotifications"]</MudText>
+            </NoRecordsContent>
+        </MudDataGrid>
+    </MudStack>
+</MudPaper>
+
+@code
+{
+    private bool _loading;
+    private List<NotificationRow> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Priming cache dla FormatUtcForUser, aby nie robić sync-IO w trakcie renderowania gridu.
+        try { await TimeZoneService.GetUserTimeZoneAsync(); } catch { }
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var rows = await NotificationsService.GetLatestForCurrentUserAsync(top: 100);
+            _rows = rows.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"{L["LoadFailed"]}: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task MarkAllAsReadAsync()
+    {
+        try
+        {
+            var affected = await NotificationsService.MarkAllAsReadForCurrentUserAsync();
+            if (affected > 0)
+            {
+                foreach (var r in _rows)
+                    r.IsRead = true;
+
+                Snackbar.Add(L["MarkedAllAsRead"], Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"{L["SaveFailed"]}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<NotificationRow> args)
+    {
+        var row = args.Item;
+        if (row == null) return;
+
+        try
+        {
+            if (!row.IsRead)
+            {
+                await NotificationsService.MarkAsReadForCurrentUserAsync(row.Id);
+                row.IsRead = true;
+            }
+
+            // Kolumny Ticket nie ma, ale klik w wiersz nadal przenosi do ticketa.
+            if (row.HasTicketLink)
+                NavigationManager.NavigateTo($"/tickets/{row.TicketId}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"{L["SaveFailed"]}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private string FormatUtcAsUserLocal(DateTime utc)
+    {
+        return TimeZoneService.FormatUtcForUser(utc);
+    }
+
+    private string GetNotificationCode(NotificationRow row)
+    {
+        // Repo powinno ustawiać TicketNumber na vw_tickets.ticket_code (WALxxxxxx).
+        if (!string.IsNullOrWhiteSpace(row.TicketNumber))
+            return row.TicketNumber;
+
+        if (row.TicketId.HasValue && row.TicketId.Value > 0)
+            return $"#{row.TicketId.Value}";
+
+        return "-";
+    }
+
+    private string MapTypeCodeToLabel(string typeCode)
+    {
+        if (string.IsNullOrWhiteSpace(typeCode))
+            return L["Unknown"];
+
+        return typeCode switch
+        {
+            "Ticket.PublicEvent.Created" => L["TicketCreated"],
+            "Ticket.PublicEvent.CommentAdded" => L["TicketCommentAdded"],
+            _ => typeCode
+        };
+    }
+}

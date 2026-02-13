@@ -61,24 +61,26 @@
 	</resheader>
 
 	<data name="Title" xml:space="preserve">
-    <value>Wydruki</value>
+    <value>Raport zużycia rękawic</value>
   </data>
 	<data name="Subtitle" xml:space="preserve">
-    <value>Statystyki i koszty wydruków w wybranym okresie</value>
+    <value>Pobrania z automatów TEMREX z filtrami, KPI i trendami</value>
   </data>
 	<data name="Refresh" xml:space="preserve">
     <value>Odśwież</value>
   </data>
 	<data name="Loading" xml:space="preserve">
-    <value>Ładowanie</value>
+    <value>Wczytywanie danych</value>
   </data>
-
+	<data name="ErrorReport" xml:space="preserve">
+    <value>Nie udało się wczytać raportu.</value>
+  </data>
 	<data name="NoAccess" xml:space="preserve">
-    <value>Brak uprawnień: {0}</value>
+    <value>Brak dostępu. Wymagane uprawnienie: {0}</value>
   </data>
 
-	<data name="DateRangeTitle" xml:space="preserve">
-    <value>Zakres dat</value>
+	<data name="FiltersTitle" xml:space="preserve">
+    <value>Filtry</value>
   </data>
 	<data name="From" xml:space="preserve">
     <value>Od</value>
@@ -86,91 +88,104 @@
 	<data name="To" xml:space="preserve">
     <value>Do</value>
   </data>
-
+	<data name="TrendGranularity" xml:space="preserve">
+    <value>Agregacja trendu</value>
+  </data>
+	<data name="Trend_Week" xml:space="preserve">
+    <value>Tygodniowo</value>
+  </data>
+	<data name="Trend_Month" xml:space="preserve">
+    <value>Miesięcznie</value>
+  </data>
 	<data name="CompareLabel" xml:space="preserve">
     <value>Porównaj z poprzednim okresem</value>
   </data>
 	<data name="ComparePeriods" xml:space="preserve">
-    <value>Obecny okres: {0} do {1}. Poprzedni okres: {2} do {3}.</value>
+    <value>Bieżący: {0} do {1}. Poprzedni: {2} do {3}.</value>
   </data>
 
-	<data name="LocationsTitle" xml:space="preserve">
-    <value>Lokalizacje</value>
+	<data name="GlovesTypes" xml:space="preserve">
+    <value>Typy rękawic</value>
   </data>
-	<data name="NoLocations" xml:space="preserve">
-    <value>Brak dostępnych lokalizacji.</value>
+	<data name="AllItems" xml:space="preserve">
+    <value>Wszystkie typy</value>
+  </data>
+	<data name="VendingMachines" xml:space="preserve">
+    <value>Automaty</value>
+  </data>
+	<data name="AllMachines" xml:space="preserve">
+    <value>Wszystkie automaty</value>
   </data>
 
-	<data name="PrintersTitle" xml:space="preserve">
-    <value>Drukarki</value>
-  </data>
 	<data name="NoDataForFilters" xml:space="preserve">
     <value>Brak danych dla wybranych filtrów.</value>
   </data>
 
-	<data name="Col_Hostname" xml:space="preserve">
-    <value>Host</value>
+	<data name="Kpi_TotalQty" xml:space="preserve">
+    <value>Łączna ilość</value>
   </data>
-	<data name="Col_Model" xml:space="preserve">
-    <value>Model</value>
+	<data name="Kpi_AvgPerDay" xml:space="preserve">
+    <value>Średnio na dzień: {0}</value>
   </data>
-	<data name="Col_Total" xml:space="preserve">
-    <value>Razem</value>
+	<data name="Kpi_Transactions" xml:space="preserve">
+    <value>Transakcje</value>
   </data>
-	<data name="Col_Mono" xml:space="preserve">
-    <value>Mono</value>
+	<data name="Kpi_UniqueUsers" xml:space="preserve">
+    <value>Unikalni użytkownicy</value>
   </data>
-	<data name="Col_Color" xml:space="preserve">
-    <value>Kolor</value>
-  </data>
-	<data name="Col_Cost" xml:space="preserve">
-    <value>Koszt</value>
-  </data>
-	<data name="Col_Trend" xml:space="preserve">
-    <value>Trend</value>
+	<data name="Kpi_TopUser" xml:space="preserve">
+    <value>Najwięcej pobrań</value>
   </data>
 
-	<data name="CurrencyPLN" xml:space="preserve">
-    <value>PLN</value>
+	<data name="TrendTitle" xml:space="preserve">
+    <value>Trend</value>
+  </data>
+	<data name="NoTrend" xml:space="preserve">
+    <value>Brak danych trendu w wybranym okresie.</value>
+  </data>
+	<data name="Series_Qty" xml:space="preserve">
+    <value>Ilość</value>
+  </data>
+
+	<data name="TopUsersTitle" xml:space="preserve">
+    <value>Top użytkownicy</value>
+  </data>
+	<data name="TopItemsTitle" xml:space="preserve">
+    <value>Top rękawice</value>
+  </data>
+	<data name="TopVmsTitle" xml:space="preserve">
+    <value>Top automaty</value>
+  </data>
+
+	<data name="Col_UserName" xml:space="preserve">
+    <value>Użytkownik</value>
+  </data>
+	<data name="Col_CardNumber" xml:space="preserve">
+    <value>Karta</value>
+  </data>
+	<data name="Col_Department" xml:space="preserve">
+    <value>Wydział</value>
+  </data>
+	<data name="Col_Qty" xml:space="preserve">
+    <value>Ilość</value>
+  </data>
+	<data name="Col_Transactions" xml:space="preserve">
+    <value>Transakcje</value>
+  </data>
+	<data name="Col_Item" xml:space="preserve">
+    <value>Pozycja</value>
+  </data>
+	<data name="Col_Vm" xml:space="preserve">
+    <value>Automat</value>
   </data>
 
 	<data name="NA" xml:space="preserve">
     <value>brak</value>
   </data>
-
+	<data name="TopUserDetails" xml:space="preserve">
+    <value>{0} szt., {1} transakcji</value>
+  </data>
 	<data name="InfinityLabel" xml:space="preserve">
-    <value>∞</value>
-  </data>
-
-	<data name="SummaryRow" xml:space="preserve">
-    <value>Suma</value>
-  </data>
-
-	<data name="SelectedPrinter" xml:space="preserve">
-    <value>Wybrana drukarka: {0} ({1})</value>
-  </data>
-	<data name="AllPrinters" xml:space="preserve">
-    <value>Wszystkie drukarki</value>
-  </data>
-
-	<data name="Kpi_TotalPages" xml:space="preserve">
-    <value>Strony razem</value>
-  </data>
-	<data name="Kpi_Mono" xml:space="preserve">
-    <value>Strony mono</value>
-  </data>
-	<data name="Kpi_Color" xml:space="preserve">
-    <value>Strony kolor</value>
-  </data>
-
-	<data name="PrevPeriodValue" xml:space="preserve">
-    <value>Poprzedni okres: {0}</value>
-  </data>
-
-	<data name="ErrorReport" xml:space="preserve">
-    <value>Nie udało się załadować raportu.</value>
-  </data>
-	<data name="ErrorLocations" xml:space="preserve">
-    <value>Nie udało się załadować lokalizacji.</value>
+    <value>Nowe</value>
   </data>
 </root>
