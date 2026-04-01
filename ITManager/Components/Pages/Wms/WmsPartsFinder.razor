@@ -1,0 +1,321 @@
+﻿@rendermode InteractiveServer
+@implements IDisposable
+
+@* File: Components/Pages/Wms/WmsPartsFinder.razor
+   Description: Touch-friendly parts search with numeric keypad.
+                Searches containers by short_system_number only.
+                Auto-search on 6th digit, auto-clear below 6.
+   Version: 1.06
+   Created: 2026-03-22
+   Change log:
+     - 1.00: Initial version.
+     - 1.01: Auto-search at 6 digits, clear below 6, bigger input,
+             instruction text, removed Type/Status columns,
+             search only by short_system_number, renamed columns.
+     - 1.02: Removed @page — now a component inside WmsHub tabs.
+     - 1.03: Instruction in MudPaper bar — now a component inside WmsHub tabs.
+     - 1.04: Enlarged search input field (wider + bigger font).
+     - 1.05: Fix auto-search — trigger ScheduleAutoSearch on keyboard input, not only numpad.
+     - 1.06: RBAC — search through WmsPartsService instead of direct repository access. *@
+
+@using System
+@using System.Collections.Generic
+@using System.Threading
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using MudBlazor
+@using Microsoft.Extensions.Localization
+@using ITManager.Models.Wms
+@using ITManager.Services.Wms
+
+@using Microsoft.JSInterop
+
+@inject WmsPartsService PartsService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject IStringLocalizer<WmsPartsFinder> L
+@inject ILogger<WmsPartsFinder> Logger
+
+<MudStack Spacing="3">
+
+    @* -- Instruction bar with kiosk button -- *@
+    <MudPaper Class="pa-3" Elevation="0" Outlined="true" Style="border-radius:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small"
+                     Style="color: var(--mud-palette-text-secondary)" />
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary)">
+                @L["Instruction"]
+            </MudText>
+            @if (!KioskMode)
+            {
+                <div style="margin-left:auto;">
+                    <MudIconButton Icon="@Icons.Material.Filled.OpenInNew"
+                                   Size="Size.Small"
+                                   Title="@L["Button.Kiosk"]"
+                                   OnClick="OpenKioskAsync" />
+                </div>
+            }
+        </div>
+    </MudPaper>
+
+    @* -- Search input + Numpad -- *@
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true" Style="border-radius:8px;">
+        <MudStack Spacing="3" AlignItems="AlignItems.Center">
+          <div style="max-width:440px; width:100%;">
+
+            @* Search input — larger *@
+            <MudTextField T="string"
+                          @ref="_searchField"
+                          Value="@_searchText"
+                          ValueChanged="OnSearchInputChangedAsync"
+                          Placeholder='@L["SearchPlaceholder"]'
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined"
+                          Immediate="true"
+                          FullWidth="true"
+                          Style="font-size:1.6rem; margin-bottom:12px;"
+                          InputType="InputType.Text"
+                          autocomplete="off"
+                          OnKeyDown="OnInputKeyDownAsync" />
+
+            @* Numeric keypad *@
+            <div class="numpad-grid" style="max-width:none;">
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("7")'>7</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("8")'>8</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("9")'>9</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("4")'>4</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("5")'>5</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("6")'>6</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("1")'>1</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("2")'>2</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("3")'>3</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                           Class="numpad-btn" OnClick="ClearInput">C</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick='() => AppendDigitAsync("0")'>0</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                           Class="numpad-btn" OnClick="BackspaceAsync">
+                    <MudIcon Icon="@Icons.Material.Filled.Backspace" />
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Class="numpad-btn numpad-search"
+                           Disabled="@(_isSearching || string.IsNullOrWhiteSpace(_searchText))"
+                           OnClick="ExecuteSearchAsync">
+                    <MudIcon Icon="@Icons.Material.Filled.Search" Class="mr-2" />
+                    @L["Button.Search"]
+                </MudButton>
+            </div>
+          </div>
+
+        </MudStack>
+    </MudPaper>
+
+    @* -- Results -- *@
+    @if (_hasSearched)
+    {
+        <MudPaper Elevation="0" Outlined="true" Class="pa-0" Style="border-radius:8px;">
+
+            @if (_results.Count > 0)
+            {
+                <MudText Typo="Typo.body2" Class="pa-3" Style="color: var(--mud-palette-text-secondary);">
+                    @string.Format(L["ResultCount"], _results.Count)
+                </MudText>
+            }
+
+            <MudDataGrid T="WmsPartFinderResultDto"
+                         Items="@_results"
+                         Hover="true"
+                         Dense="true"
+                         Elevation="0"
+                         Bordered="false"
+                         Loading="@_isSearching"
+                         Filterable="false"
+                         SortMode="SortMode.None">
+                <Columns>
+                    <PropertyColumn Property="x => x.ShortSystemNumber" Title='@L["Col.PartNumber"]' />
+                    <PropertyColumn Property="x => x.PartName" Title='@L["Col.PartName"]' />
+                    <PropertyColumn Property="x => x.LocationName" Title='@L["Col.Location"]' />
+                    <PropertyColumn Property="x => x.RackName" Title='@L["Col.Rack"]' />
+                    <PropertyColumn Property="x => x.ShelfName" Title='@L["Col.Shelf"]' />
+                    <PropertyColumn Property="x => x.ContainerQr" Title='@L["Col.ContainerQr"]' />
+                </Columns>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary)" Class="pa-4">
+                        @L["NoRecords"]
+                    </MudText>
+                </NoRecordsContent>
+            </MudDataGrid>
+        </MudPaper>
+    }
+
+</MudStack>
+
+@code {
+    [Parameter] public bool KioskMode { get; set; }
+
+    private const int AutoSearchLength = 6;
+    private const int AutoSearchDebounceMs = 250;
+    private const int KioskIdleResetMs = 60_000; // 60 seconds
+
+    private MudTextField<string>? _searchField;
+
+    private string? _searchText;
+    private bool _isSearching;
+    private bool _hasSearched;
+    private List<WmsPartFinderResultDto> _results = new();
+    private System.Threading.Timer? _autoSearchTimer;
+    private System.Threading.Timer? _idleTimer;
+
+    private async Task OnSearchInputChangedAsync(string value)
+    {
+        _searchText = value;
+        CancelAutoSearch();
+        AutoClearIfNeeded();
+        ScheduleAutoSearch();
+        ResetIdleTimer();
+        await Task.CompletedTask;
+    }
+
+    private async Task AppendDigitAsync(string digit)
+    {
+        _searchText = (_searchText ?? string.Empty) + digit;
+        ScheduleAutoSearch();
+        ResetIdleTimer();
+        await Task.CompletedTask;
+    }
+
+    private async Task BackspaceAsync()
+    {
+        if (string.IsNullOrEmpty(_searchText))
+            return;
+
+        _searchText = _searchText[..^1];
+        CancelAutoSearch();
+        AutoClearIfNeeded();
+        ResetIdleTimer();
+        await Task.CompletedTask;
+    }
+
+    private void ClearInput()
+    {
+        _searchText = null;
+        _hasSearched = false;
+        _results.Clear();
+        CancelAutoSearch();
+        ResetIdleTimer();
+    }
+
+    private async Task OnInputKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_searchText))
+        {
+            CancelAutoSearch();
+            await ExecuteSearchAsync();
+        }
+    }
+
+    /// <summary>
+    /// Debounced auto-search: waits 250ms after last digit before searching.
+    /// Prevents premature search when barcode scanner sends characters rapidly.
+    /// </summary>
+    private void ScheduleAutoSearch()
+    {
+        var len = (_searchText ?? "").Length;
+        if (len < AutoSearchLength) return;
+
+        CancelAutoSearch();
+        _autoSearchTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                if ((_searchText ?? "").Length >= AutoSearchLength && !_isSearching)
+                    await ExecuteSearchAsync();
+            });
+        }, null, AutoSearchDebounceMs, Timeout.Infinite);
+    }
+
+    private void CancelAutoSearch()
+    {
+        _autoSearchTimer?.Dispose();
+        _autoSearchTimer = null;
+    }
+
+    private void AutoClearIfNeeded()
+    {
+        var len = (_searchText ?? "").Length;
+        if (len < AutoSearchLength && _hasSearched)
+        {
+            _hasSearched = false;
+            _results.Clear();
+        }
+    }
+
+    private async Task ExecuteSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_searchText) || _isSearching)
+            return;
+
+        _isSearching = true;
+        _hasSearched = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            _results = await PartsService.SearchPartLocationsAsync(
+                _searchText, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WMS PartsFinder] Search error for: {Search}", _searchText);
+            Snackbar.Add(L["Error.SearchFailed"], Severity.Error);
+            _results = new List<WmsPartFinderResultDto>();
+        }
+        finally
+        {
+            _isSearching = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OpenKioskAsync()
+    {
+        await JS.InvokeVoidAsync("open", "/wms/kiosk", "_blank");
+    }
+
+    // ── Kiosk idle auto-reset ────────────────────────────────────────
+
+    private void ResetIdleTimer()
+    {
+        if (!KioskMode) return;
+
+        _idleTimer?.Dispose();
+        _idleTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(() =>
+            {
+                _searchText = null;
+                _hasSearched = false;
+                _results.Clear();
+                CancelAutoSearch();
+                StateHasChanged();
+            });
+        }, null, KioskIdleResetMs, Timeout.Infinite);
+    }
+
+    public void Dispose()
+    {
+        _autoSearchTimer?.Dispose();
+        _idleTimer?.Dispose();
+    }
+}
